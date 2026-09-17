@@ -10,7 +10,8 @@ directly to that player's profile alongside their auto-scraped season stats.
   each team's roster + season-stats pages and upserts one row per player into the Supabase
   `players` table. Runs daily via `.github/workflows/scrape.yml` (GitHub Actions cron, 10am
   UTC / 5am ET), and can be triggered manually from the Actions tab.
-- **`site/`** is a static dashboard (no build step) hosted on GitHub Pages:
+- **`docs/`** is a static dashboard (no build step) hosted on GitHub Pages (Pages only serves
+  from `/` or `/docs`, hence the folder name):
   - `index.html` — searchable/filterable/sortable list of every player
   - `player.html` — one player's stats + full scouting report history
   - `report.html` — the form scouts fill out; writes directly to Supabase
@@ -26,7 +27,7 @@ directly to that player's profile alongside their auto-scraped season stats.
    - In Project Settings -> API, grab the **Project URL**, the **anon public** key, and the
      **service_role** key.
 
-2. **Fill in `site/config.js`** with the Project URL and anon key (safe to commit — RLS is
+2. **Fill in `docs/config.js`** with the Project URL and anon key (safe to commit — RLS is
    what actually restricts access, not secrecy of this key):
    ```js
    window.SUPABASE_URL = "https://xxxxx.supabase.co";
@@ -36,9 +37,9 @@ directly to that player's profile alongside their auto-scraped season stats.
 3. **Add GitHub repo secrets** (Settings -> Secrets and variables -> Actions):
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_KEY` (the service_role key — keep this one secret, never put it in
-     `site/`)
+     `docs/`)
 
-4. **Enable GitHub Pages** (Settings -> Pages) serving from the `site/` folder on `main`.
+4. **Enable GitHub Pages** (Settings -> Pages) serving from the `docs/` folder on `master`.
 
 5. **Run the workflow once manually** (Actions tab -> Daily Player Stats Update -> Run
    workflow) to populate the `players` table before sharing the site.
@@ -52,7 +53,7 @@ pip install -r requirements.txt
 TEAM_LIMIT=3 SUPABASE_URL=... SUPABASE_SERVICE_KEY=... python scrape_espn.py
 
 # Preview the site locally:
-cd ../site
+cd ../docs
 python -m http.server 8000
 # open http://localhost:8000
 ```
