@@ -6,11 +6,12 @@ then scrapes each team's roster + season stats pages, and upserts one row per pl
 into the Supabase `players` table. Scouting `reports` are a separate table this script
 never touches, so daily stat refreshes never disturb submitted scouting reports.
 
-HTTP requests are made by shelling out to curl rather than using Python's `requests`.
-ESPN's bot mitigation soft-blocks requests/urllib3's TLS/HTTP fingerprint from GitHub
-Actions runners (confirmed: empty 202 responses), the same way it would block a plain
-Python script anywhere -- but curl (and R's httr/libcurl, which the sibling Moats project
-has used successfully from the same kind of runner for months) gets through fine.
+Fetches go through a real headless Chromium browser (Playwright), not a plain HTTP
+client. ESPN's standings/team pages sit behind AWS WAF Bot Control, which serves a
+JS proof-of-work challenge (HTTP 202, no real content) to non-browser clients -
+confirmed against both `requests` and bare `curl` with full browser-style headers,
+both from GitHub Actions runners specifically. A real browser executes that challenge
+transparently, the same way it would for any ordinary site visitor.
 
 Env vars required:
   SUPABASE_URL
@@ -22,7 +23,6 @@ Optional:
 
 import os
 import re
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -30,16 +30,15 @@ from io import StringIO
 
 import pandas as pd
 from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 from supabase import create_client
-
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 STANDINGS_URL = "https://www.espn.com/mens-college-basketball/standings"
 ROSTER_URL = "https://www.espn.com/mens-college-basketball/team/roster/_/id/{team_id}"
 STATS_URL = "https://www.espn.com/mens-college-basketball/team/stats/_/id/{team_id}"
 
-REQUEST_TIMEOUT = 30
-SLEEP_BETWEEN_TEAMS = 0.4
+PAGE_TIMEOUT_MS = 30000
+SLEEP_BETWEEN_TEAMS = 0.3
 
 STAT_COLUMN_MAP = {
     "GP": "gp",
@@ -56,38 +55,10 @@ STAT_COLUMN_MAP = {
 }
 
 
-STATUS_MARKER = "\n__CURL_STATUS__"
-
-
-def curl_get(url, timeout=REQUEST_TIMEOUT):
-    result = subprocess.run(
-        [
-            "curl",
-            "-sS",
-            "-L",
-            "-A",
-            UA,
-            "--max-time",
-            str(timeout),
-            "-w",
-            STATUS_MARKER + "%{http_code}",
-            url,
-        ],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"curl exit {result.returncode} for {url}: {result.stderr.strip()}")
-    idx = result.stdout.rfind(STATUS_MARKER)
-    if idx == -1:
-        raise RuntimeError(f"curl: no status marker in response for {url}")
-    body = result.stdout[:idx]
-    status = int(result.stdout[idx + len(STATUS_MARKER) :].strip())
-    if status >= 400:
-        raise RuntimeError(f"HTTP {status} for {url}")
-    return body, status
+def fetch_html(page, url):
+    page.goto(url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
+    page.wait_for_selector("table", timeout=PAGE_TIMEOUT_MS)
+    return page.content()
 
 
 def slugify(s):
@@ -107,10 +78,10 @@ def _num(v):
         return None
 
 
-def get_teams():
+def get_teams(page):
     """Returns a list of dicts: {team_id, name, conference, record}."""
-    body, _ = curl_get(STANDINGS_URL)
-    soup = BeautifulSoup(body, "html.parser")
+    html = fetch_html(page, STANDINGS_URL)
+    soup = BeautifulSoup(html, "html.parser")
 
     conf_names = [t.get_text(strip=True) for t in soup.select("div.Table__Title")]
     tables = soup.find_all("table")
@@ -161,13 +132,13 @@ def strip_position_suffix(raw_name):
     return re.sub(r"\s+[A-Z]{1,2}$", "", raw_name).strip()
 
 
-def scrape_roster(team_id):
+def scrape_roster(page, team_id):
     """Returns {player_name: {position, class, height, weight}}."""
     info = {}
     url = ROSTER_URL.format(team_id=team_id)
     try:
-        body, _ = curl_get(url)
-        tables = pd.read_html(StringIO(body))
+        html = fetch_html(page, url)
+        tables = pd.read_html(StringIO(html))
         if not tables:
             return info
         df = tables[0]
@@ -187,13 +158,13 @@ def scrape_roster(team_id):
     return info
 
 
-def scrape_stats(team_id):
+def scrape_stats(page, team_id):
     """Returns {player_name: {gp, min, ppg, rpg, apg, spg, bpg, topg, fg_pct, ft_pct, three_pct}}."""
     info = {}
     url = STATS_URL.format(team_id=team_id)
     try:
-        body, _ = curl_get(url)
-        tables = pd.read_html(StringIO(body))
+        html = fetch_html(page, url)
+        tables = pd.read_html(StringIO(html))
         if len(tables) < 2:
             return info
         names_df, stats_df = tables[0], tables[1]
@@ -214,15 +185,15 @@ def scrape_stats(team_id):
     return info
 
 
-def scrape_team(team):
+def scrape_team(page, team):
     team_id, team_name, conference, record = (
         team["team_id"],
         team["name"],
         team["conference"],
         team["record"],
     )
-    roster = scrape_roster(team_id)
-    stats = scrape_stats(team_id)
+    roster = scrape_roster(page, team_id)
+    stats = scrape_stats(page, team_id)
 
     all_names = set(roster.keys()) | set(stats.keys())
     now = datetime.now(timezone.utc).isoformat()
@@ -279,22 +250,33 @@ def main():
 
     client = create_client(supabase_url, supabase_key)
 
-    print("Fetching D1 team list from ESPN standings...")
-    teams = get_teams()
-    print(f"Found {len(teams)} teams.")
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            )
+        )
 
-    team_limit = os.environ.get("TEAM_LIMIT", "").strip()
-    if team_limit:
-        teams = teams[: int(team_limit)]
-        print(f"TEAM_LIMIT set, only scraping first {len(teams)} teams.")
+        print("Fetching D1 team list from ESPN standings...")
+        teams = get_teams(page)
+        print(f"Found {len(teams)} teams.")
 
-    total_players = 0
-    for i, team in enumerate(teams, start=1):
-        print(f"[{i}/{len(teams)}] {team['name']} ({team['conference']})")
-        rows = scrape_team(team)
-        upsert_players(client, rows)
-        total_players += len(rows)
-        time.sleep(SLEEP_BETWEEN_TEAMS)
+        team_limit = os.environ.get("TEAM_LIMIT", "").strip()
+        if team_limit:
+            teams = teams[: int(team_limit)]
+            print(f"TEAM_LIMIT set, only scraping first {len(teams)} teams.")
+
+        total_players = 0
+        for i, team in enumerate(teams, start=1):
+            print(f"[{i}/{len(teams)}] {team['name']} ({team['conference']})")
+            rows = scrape_team(page, team)
+            upsert_players(client, rows)
+            total_players += len(rows)
+            time.sleep(SLEEP_BETWEEN_TEAMS)
+
+        browser.close()
 
     print(f"\nDone. Upserted stats for {total_players} players across {len(teams)} teams.")
 

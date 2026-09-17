@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r scraper/requirements.txt
 
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
       - name: Scrape D1 rosters/stats and upsert to Supabase
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
