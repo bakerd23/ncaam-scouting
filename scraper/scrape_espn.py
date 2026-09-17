@@ -25,6 +25,7 @@ from io import StringIO
 import pandas as pd
 import requests
 import urllib3.util.connection as urllib3_connection
+from bs4 import BeautifulSoup
 from supabase import create_client
 
 # Some networks (including this project's dev sandbox) have broken/blackholed IPv6 routes.
@@ -37,9 +38,7 @@ UA_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 }
 
-STANDINGS_API = (
-    "https://site.api.espn.com/apis/v2/sports/basketball/mens-college-basketball/standings?level=3"
-)
+STANDINGS_URL = "https://www.espn.com/mens-college-basketball/standings"
 ROSTER_URL = "https://www.espn.com/mens-college-basketball/team/roster/_/id/{team_id}"
 STATS_URL = "https://www.espn.com/mens-college-basketball/team/stats/_/id/{team_id}"
 
@@ -79,25 +78,47 @@ def _num(v):
 
 
 def get_teams():
-    """Returns a list of dicts: {team_id, name, conference, record}."""
-    r = requests.get(STANDINGS_API, headers=UA_HEADERS, timeout=REQUEST_TIMEOUT)
+    """Returns a list of dicts: {team_id, name, conference, record}.
+
+    Scrapes the plain HTML standings page rather than ESPN's site.api.espn.com JSON
+    endpoint - that API endpoint 403s from GitHub Actions runner IPs (likely bot
+    protection targeting cloud/datacenter ranges), while the regular www.espn.com pages
+    work fine, same as the proven Moats/transfer-portal scraper.
+    """
+    r = requests.get(STANDINGS_URL, headers=UA_HEADERS, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
-    data = r.json()
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    conf_names = [t.get_text(strip=True) for t in soup.select("div.Table__Title")]
+    tables = soup.find_all("table")
 
     teams = []
-    for conf in data.get("children", []):
-        conf_name = conf.get("name") or conf.get("abbreviation") or ""
-        for entry in conf.get("standings", {}).get("entries", []):
-            team = entry.get("team", {})
-            team_id = team.get("id")
-            name = team.get("displayName")
-            if not team_id or not name:
+    for i, conf_name in enumerate(conf_names):
+        names_table = tables[2 * i] if 2 * i < len(tables) else None
+        stats_table = tables[2 * i + 1] if 2 * i + 1 < len(tables) else None
+        if names_table is None or stats_table is None:
+            continue
+
+        team_entries = []
+        for tr in names_table.find_all("tr"):
+            link = tr.select_one("span.hide-mobile a") or tr.select_one("a.AnchorLink")
+            if not link:
                 continue
-            record = ""
-            for stat in entry.get("stats", []):
-                if stat.get("type") == "total":
-                    record = stat.get("displayValue", "")
-                    break
+            href = link.get("href", "")
+            m = re.search(r"/id/(\d+)/", href)
+            if not m:
+                continue
+            team_entries.append((m.group(1), link.get_text(strip=True)))
+
+        stat_rows = stats_table.find_all("tr")
+        # First 2 rows are grouped/sub headers ("Conference/Overall/Polls", "W-L/GB/PCT/...").
+        data_rows = stat_rows[2:]
+
+        n = min(len(team_entries), len(data_rows))
+        for j in range(n):
+            team_id, name = team_entries[j]
+            cells = [c.get_text(strip=True) for c in data_rows[j].find_all(["td", "th"])]
+            record = cells[3] if len(cells) > 3 else ""  # "Overall W-L" column
             teams.append(
                 {
                     "team_id": team_id,
