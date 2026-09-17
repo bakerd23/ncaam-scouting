@@ -1,10 +1,16 @@
 """
 Daily D1 men's college basketball scraper.
 
-Pulls every D1 team from ESPN's standings API (which also gives conference + record),
+Pulls every D1 team from ESPN's standings page (which also gives conference + record),
 then scrapes each team's roster + season stats pages, and upserts one row per player
 into the Supabase `players` table. Scouting `reports` are a separate table this script
 never touches, so daily stat refreshes never disturb submitted scouting reports.
+
+HTTP requests are made by shelling out to curl rather than using Python's `requests`.
+ESPN's bot mitigation soft-blocks requests/urllib3's TLS/HTTP fingerprint from GitHub
+Actions runners (confirmed: empty 202 responses), the same way it would block a plain
+Python script anywhere -- but curl (and R's httr/libcurl, which the sibling Moats project
+has used successfully from the same kind of runner for months) gets through fine.
 
 Env vars required:
   SUPABASE_URL
@@ -16,27 +22,17 @@ Optional:
 
 import os
 import re
-import socket
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from io import StringIO
 
 import pandas as pd
-import requests
-import urllib3.util.connection as urllib3_connection
 from bs4 import BeautifulSoup
 from supabase import create_client
 
-# Some networks (including this project's dev sandbox) have broken/blackholed IPv6 routes.
-# requests/urllib3 tries IPv6 first and waits out a long OS-level connect timeout before
-# falling back to IPv4, turning every request into a 60-170s stall. Forcing IPv4-only avoids
-# that entirely; it's a no-op on networks where IPv6 works fine.
-urllib3_connection.allowed_gai_family = lambda: socket.AF_INET
-
-UA_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-}
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 STANDINGS_URL = "https://www.espn.com/mens-college-basketball/standings"
 ROSTER_URL = "https://www.espn.com/mens-college-basketball/team/roster/_/id/{team_id}"
@@ -60,6 +56,40 @@ STAT_COLUMN_MAP = {
 }
 
 
+STATUS_MARKER = "\n__CURL_STATUS__"
+
+
+def curl_get(url, timeout=REQUEST_TIMEOUT):
+    result = subprocess.run(
+        [
+            "curl",
+            "-sS",
+            "-L",
+            "-A",
+            UA,
+            "--max-time",
+            str(timeout),
+            "-w",
+            STATUS_MARKER + "%{http_code}",
+            url,
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"curl exit {result.returncode} for {url}: {result.stderr.strip()}")
+    idx = result.stdout.rfind(STATUS_MARKER)
+    if idx == -1:
+        raise RuntimeError(f"curl: no status marker in response for {url}")
+    body = result.stdout[:idx]
+    status = int(result.stdout[idx + len(STATUS_MARKER) :].strip())
+    if status >= 400:
+        raise RuntimeError(f"HTTP {status} for {url}")
+    return body, status
+
+
 def slugify(s):
     s = re.sub(r"[^a-zA-Z0-9]+", "-", (s or "").strip().lower())
     return s.strip("-") or "unknown"
@@ -78,23 +108,12 @@ def _num(v):
 
 
 def get_teams():
-    """Returns a list of dicts: {team_id, name, conference, record}.
-
-    Scrapes the plain HTML standings page rather than ESPN's site.api.espn.com JSON
-    endpoint - that API endpoint 403s from GitHub Actions runner IPs (likely bot
-    protection targeting cloud/datacenter ranges), while the regular www.espn.com pages
-    work fine, same as the proven Moats/transfer-portal scraper.
-    """
-    r = requests.get(STANDINGS_URL, headers=UA_HEADERS, timeout=REQUEST_TIMEOUT)
-    r.raise_for_status()
-    print(f"  debug: standings page status={r.status_code} length={len(r.text)}")
-    soup = BeautifulSoup(r.text, "html.parser")
+    """Returns a list of dicts: {team_id, name, conference, record}."""
+    body, _ = curl_get(STANDINGS_URL)
+    soup = BeautifulSoup(body, "html.parser")
 
     conf_names = [t.get_text(strip=True) for t in soup.select("div.Table__Title")]
     tables = soup.find_all("table")
-    print(f"  debug: found {len(conf_names)} conference titles, {len(tables)} tables")
-    if not conf_names:
-        print(f"  debug: first 500 chars of response:\n{r.text[:500]}")
 
     teams = []
     for i, conf_name in enumerate(conf_names):
@@ -147,9 +166,8 @@ def scrape_roster(team_id):
     info = {}
     url = ROSTER_URL.format(team_id=team_id)
     try:
-        r = requests.get(url, headers=UA_HEADERS, timeout=REQUEST_TIMEOUT)
-        r.raise_for_status()
-        tables = pd.read_html(StringIO(r.text))
+        body, _ = curl_get(url)
+        tables = pd.read_html(StringIO(body))
         if not tables:
             return info
         df = tables[0]
@@ -174,9 +192,8 @@ def scrape_stats(team_id):
     info = {}
     url = STATS_URL.format(team_id=team_id)
     try:
-        r = requests.get(url, headers=UA_HEADERS, timeout=REQUEST_TIMEOUT)
-        r.raise_for_status()
-        tables = pd.read_html(StringIO(r.text))
+        body, _ = curl_get(url)
+        tables = pd.read_html(StringIO(body))
         if len(tables) < 2:
             return info
         names_df, stats_df = tables[0], tables[1]
