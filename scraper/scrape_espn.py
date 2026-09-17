@@ -87,10 +87,14 @@ def get_teams():
     """
     r = requests.get(STANDINGS_URL, headers=UA_HEADERS, timeout=REQUEST_TIMEOUT)
     r.raise_for_status()
+    print(f"  debug: standings page status={r.status_code} length={len(r.text)}")
     soup = BeautifulSoup(r.text, "html.parser")
 
     conf_names = [t.get_text(strip=True) for t in soup.select("div.Table__Title")]
     tables = soup.find_all("table")
+    print(f"  debug: found {len(conf_names)} conference titles, {len(tables)} tables")
+    if not conf_names:
+        print(f"  debug: first 500 chars of response:\n{r.text[:500]}")
 
     teams = []
     for i, conf_name in enumerate(conf_names):
