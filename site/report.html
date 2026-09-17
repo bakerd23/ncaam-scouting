@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Submit a Scouting Report</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>College Basketball Scouting Database</h1>
+    <nav>
+      <a href="index.html">Players</a>
+      <a href="report.html">Submit a Report</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="card">
+      <h1 style="margin-top:0;">Submit a Scouting Report</h1>
+      <p class="player-meta">Watched a player? Fill this out and it'll attach straight to their profile.</p>
+
+      <form class="report-form" id="report-form">
+        <div class="field">
+          <label for="player-search">Player</label>
+          <input type="text" id="player-search" placeholder="Start typing a player name..." autocomplete="off" />
+          <div id="player-search-results" style="display:none;"></div>
+          <div id="selected-player" style="display:none;" class="selected-player"></div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="scout-name">Your name</label>
+            <input type="text" id="scout-name" required />
+          </div>
+          <div class="field">
+            <label for="date-watched">Date watched</label>
+            <input type="date" id="date-watched" required />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="context">Context (game, event, practice, etc.)</label>
+          <input type="text" id="context" placeholder="e.g. vs Duke 1/14, or Fall Practice" />
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label for="overall-grade">Overall grade (1-10)</label>
+            <input type="number" id="overall-grade" min="1" max="10" step="1" />
+          </div>
+          <div class="field">
+            <label for="projection">Projection</label>
+            <select id="projection">
+              <option value="">-- select --</option>
+              <option>Priority</option>
+              <option>Depth</option>
+              <option>Monitor</option>
+              <option>Pass</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="strengths">Strengths</label>
+          <textarea id="strengths"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="weaknesses">Weaknesses</label>
+          <textarea id="weaknesses"></textarea>
+        </div>
+
+        <div class="field">
+          <label for="notes">Additional notes</label>
+          <textarea id="notes"></textarea>
+        </div>
+
+        <div>
+          <button type="submit" class="btn" id="submit-btn">Submit Report</button>
+        </div>
+
+        <div id="form-msg"></div>
+      </form>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    let allPlayers = [];
+    let selectedPlayer = null;
+
+    function showSelectedPlayer(p) {
+      selectedPlayer = p;
+      const el = document.getElementById("selected-player");
+      el.style.display = "block";
+      el.innerHTML = `Reporting on: <strong>${escapeHtml(p.name)}</strong> (${escapeHtml(p.school)}) &middot; <a href="#" id="clear-player">change</a>`;
+      document.getElementById("player-search").style.display = "none";
+      document.getElementById("player-search-results").style.display = "none";
+      document.getElementById("clear-player").addEventListener("click", (e) => {
+        e.preventDefault();
+        selectedPlayer = null;
+        el.style.display = "none";
+        document.getElementById("player-search").style.display = "";
+        document.getElementById("player-search").value = "";
+        document.getElementById("player-search").focus();
+      });
+    }
+
+    function renderSearchResults(matches) {
+      const box = document.getElementById("player-search-results");
+      if (matches.length === 0) {
+        box.style.display = "none";
+        box.innerHTML = "";
+        return;
+      }
+      box.style.display = "block";
+      box.innerHTML = matches
+        .slice(0, 25)
+        .map(
+          (p) =>
+            `<div data-id="${escapeHtml(p.player_id)}">${escapeHtml(p.name)} <span class="player-meta">(${escapeHtml(p.school)})</span></div>`
+        )
+        .join("");
+      box.querySelectorAll("div[data-id]").forEach((div) => {
+        div.addEventListener("click", () => {
+          const p = allPlayers.find((pl) => pl.player_id === div.dataset.id);
+          if (p) showSelectedPlayer(p);
+        });
+      });
+    }
+
+    document.getElementById("player-search").addEventListener("input", (e) => {
+      const term = e.target.value.trim().toLowerCase();
+      if (!term) {
+        renderSearchResults([]);
+        return;
+      }
+      const matches = allPlayers.filter((p) => p.name.toLowerCase().includes(term));
+      renderSearchResults(matches);
+    });
+
+    document.getElementById("report-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("form-msg");
+      msg.innerHTML = "";
+
+      if (!selectedPlayer) {
+        msg.innerHTML = '<div class="msg error">Please select a player first.</div>';
+        return;
+      }
+
+      const scoutName = document.getElementById("scout-name").value.trim();
+      const dateWatched = document.getElementById("date-watched").value;
+      if (!scoutName || !dateWatched) {
+        msg.innerHTML = '<div class="msg error">Name and date watched are required.</div>';
+        return;
+      }
+
+      const gradeRaw = document.getElementById("overall-grade").value;
+      const report = {
+        player_id: selectedPlayer.player_id,
+        scout_name: scoutName,
+        date_watched: dateWatched,
+        context: document.getElementById("context").value.trim() || null,
+        overall_grade: gradeRaw ? Number(gradeRaw) : null,
+        projection: document.getElementById("projection").value || null,
+        strengths: document.getElementById("strengths").value.trim() || null,
+        weaknesses: document.getElementById("weaknesses").value.trim() || null,
+        notes: document.getElementById("notes").value.trim() || null,
+      };
+
+      const btn = document.getElementById("submit-btn");
+      btn.disabled = true;
+      btn.textContent = "Submitting...";
+      try {
+        await submitReport(report);
+        msg.innerHTML = '<div class="msg success">Report submitted. Thanks!</div>';
+        document.getElementById("report-form").reset();
+        selectedPlayer = null;
+        document.getElementById("selected-player").style.display = "none";
+        document.getElementById("player-search").style.display = "";
+      } catch (err) {
+        msg.innerHTML = `<div class="msg error">Failed to submit: ${escapeHtml(err.message)}</div>`;
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Submit Report";
+      }
+    });
+
+    (async function init() {
+      try {
+        allPlayers = await fetchAllPlayers();
+        const presetId = qs("id");
+        if (presetId) {
+          const p = allPlayers.find((pl) => pl.player_id === presetId);
+          if (p) showSelectedPlayer(p);
+        }
+      } catch (e) {
+        document.getElementById("form-msg").innerHTML =
+          `<div class="msg error">Failed to load player list: ${escapeHtml(e.message)}</div>`;
+        console.error(e);
+      }
+    })();
+  </script>
+</body>
+</html>

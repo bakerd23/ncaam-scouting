@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Player</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>College Basketball Scouting Database</h1>
+    <nav>
+      <a href="index.html">Players</a>
+      <a href="report.html">Submit a Report</a>
+    </nav>
+  </header>
+
+  <main>
+    <div id="content">
+      <p class="status-line">Loading...</p>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    function renderPlayer(p, reports) {
+      const content = document.getElementById("content");
+      content.innerHTML = `
+        <div class="card">
+          <div class="player-heading">
+            <h1>${escapeHtml(p.name)}</h1>
+            <span class="player-meta">${escapeHtml(p.position || "")} &middot; ${escapeHtml(p.class || "")} &middot; ${escapeHtml(p.height || "")} &middot; ${escapeHtml(p.weight || "")}</span>
+          </div>
+          <div class="player-meta" style="margin-top:6px;">
+            ${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; Record: ${escapeHtml(p.record || "—")}
+          </div>
+          <div class="stat-grid">
+            <div class="stat-tile"><div class="value">${fmtStat(p.gp, 0)}</div><div class="label">GP</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.min)}</div><div class="label">MIN</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.ppg)}</div><div class="label">PPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.rpg)}</div><div class="label">RPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.apg)}</div><div class="label">APG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.spg)}</div><div class="label">SPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.bpg)}</div><div class="label">BPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.topg)}</div><div class="label">TOPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.fg_pct)}</div><div class="label">FG%</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.three_pct)}</div><div class="label">3P%</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.ft_pct)}</div><div class="label">FT%</div></div>
+          </div>
+          <p class="player-meta" style="margin-top:14px;">Stats last updated: ${p.last_updated ? new Date(p.last_updated).toLocaleString() : "—"}</p>
+          <a class="btn" href="report.html?id=${encodeURIComponent(p.player_id)}">Add a Scouting Report</a>
+        </div>
+
+        <div class="card">
+          <h2 style="margin-top:0;">Scouting Reports (${reports.length})</h2>
+          <div id="reports-list">
+            ${
+              reports.length === 0
+                ? '<p class="player-meta">No reports yet for this player.</p>'
+                : reports.map(renderReportCard).join("")
+            }
+          </div>
+        </div>
+      `;
+    }
+
+    function renderReportCard(r) {
+      const field = (label, value) =>
+        value
+          ? `<div class="report-field"><div class="field-label">${label}</div><div>${escapeHtml(value)}</div></div>`
+          : "";
+      return `
+        <div class="report-card">
+          <div class="report-head">
+            <span><strong>${escapeHtml(r.scout_name)}</strong> &middot; ${escapeHtml(r.date_watched)}${r.context ? " &middot; " + escapeHtml(r.context) : ""}</span>
+            ${r.overall_grade !== null && r.overall_grade !== undefined ? `<span class="grade-pill">${escapeHtml(r.overall_grade)}/10</span>` : ""}
+          </div>
+          ${field("Projection", r.projection)}
+          ${field("Strengths", r.strengths)}
+          ${field("Weaknesses", r.weaknesses)}
+          ${field("Notes", r.notes)}
+        </div>
+      `;
+    }
+
+    (async function init() {
+      const id = qs("id");
+      const content = document.getElementById("content");
+      if (!id) {
+        content.innerHTML = '<p class="status-line">No player specified.</p>';
+        return;
+      }
+      try {
+        const [player, reports] = await Promise.all([fetchPlayer(id), fetchReports(id)]);
+        if (!player) {
+          content.innerHTML = '<p class="status-line">Player not found.</p>';
+          return;
+        }
+        renderPlayer(player, reports);
+      } catch (e) {
+        content.innerHTML = `<p class="status-line">Failed to load player: ${escapeHtml(e.message)}</p>`;
+        console.error(e);
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Player Database</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>College Basketball Scouting Database</h1>
+    <nav>
+      <a href="index.html">Players</a>
+      <a href="report.html">Submit a Report</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="controls">
+      <input type="text" id="search" class="search-box" placeholder="Search player name..." />
+      <select id="filter-conference"><option value="">All Conferences</option></select>
+      <select id="filter-school"><option value="">All Schools</option></select>
+      <select id="filter-position"><option value="">All Positions</option></select>
+      <select id="filter-class"><option value="">All Classes</option></select>
+    </div>
+
+    <div class="status-line" id="status-line">Loading players...</div>
+
+    <div style="overflow-x:auto;">
+      <table id="players-table">
+        <thead>
+          <tr>
+            <th data-sort="name">Player</th>
+            <th data-sort="school">School</th>
+            <th data-sort="conference">Conference</th>
+            <th data-sort="position">Pos</th>
+            <th data-sort="class">Class</th>
+            <th data-sort="ppg">PPG</th>
+            <th data-sort="rpg">RPG</th>
+            <th data-sort="apg">APG</th>
+            <th data-sort="spg">SPG</th>
+            <th data-sort="bpg">BPG</th>
+            <th data-sort="fg_pct">FG%</th>
+            <th data-sort="three_pct">3P%</th>
+            <th data-sort="ft_pct">FT%</th>
+          </tr>
+        </thead>
+        <tbody id="players-tbody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    let allPlayers = [];
+    let sortKey = "name";
+    let sortAsc = true;
+
+    function populateFilterOptions() {
+      const conferences = [...new Set(allPlayers.map((p) => p.conference).filter(Boolean))].sort();
+      const schools = [...new Set(allPlayers.map((p) => p.school).filter(Boolean))].sort();
+      const positions = [...new Set(allPlayers.map((p) => p.position).filter(Boolean))].sort();
+      const classes = [...new Set(allPlayers.map((p) => p.class).filter(Boolean))].sort();
+
+      const fill = (id, values) => {
+        const el = document.getElementById(id);
+        for (const v of values) {
+          const opt = document.createElement("option");
+          opt.value = v;
+          opt.textContent = v;
+          el.appendChild(opt);
+        }
+      };
+      fill("filter-conference", conferences);
+      fill("filter-school", schools);
+      fill("filter-position", positions);
+      fill("filter-class", classes);
+    }
+
+    function currentFilters() {
+      return {
+        search: document.getElementById("search").value.trim().toLowerCase(),
+        conference: document.getElementById("filter-conference").value,
+        school: document.getElementById("filter-school").value,
+        position: document.getElementById("filter-position").value,
+        cls: document.getElementById("filter-class").value,
+      };
+    }
+
+    function applyFiltersAndSort() {
+      const f = currentFilters();
+      let rows = allPlayers.filter((p) => {
+        if (f.search && !p.name.toLowerCase().includes(f.search)) return false;
+        if (f.conference && p.conference !== f.conference) return false;
+        if (f.school && p.school !== f.school) return false;
+        if (f.position && p.position !== f.position) return false;
+        if (f.cls && p.class !== f.cls) return false;
+        return true;
+      });
+
+      rows.sort((a, b) => {
+        const av = a[sortKey];
+        const bv = b[sortKey];
+        const an = av === null || av === undefined;
+        const bn = bv === null || bv === undefined;
+        if (an && bn) return 0;
+        if (an) return 1;
+        if (bn) return -1;
+        if (typeof av === "number" || typeof bv === "number") {
+          return sortAsc ? av - bv : bv - av;
+        }
+        return sortAsc
+          ? String(av).localeCompare(String(bv))
+          : String(bv).localeCompare(String(av));
+      });
+
+      renderRows(rows);
+      document.getElementById("status-line").textContent =
+        `${rows.length} of ${allPlayers.length} players`;
+    }
+
+    function renderRows(rows) {
+      const tbody = document.getElementById("players-tbody");
+      tbody.innerHTML = rows
+        .map(
+          (p) => `
+        <tr onclick="window.location.href='${playerLink(p.player_id)}'">
+          <td>${escapeHtml(p.name)}</td>
+          <td>${escapeHtml(p.school)}</td>
+          <td>${escapeHtml(p.conference)}</td>
+          <td>${escapeHtml(p.position)}</td>
+          <td>${escapeHtml(p.class)}</td>
+          <td>${fmtStat(p.ppg)}</td>
+          <td>${fmtStat(p.rpg)}</td>
+          <td>${fmtStat(p.apg)}</td>
+          <td>${fmtStat(p.spg)}</td>
+          <td>${fmtStat(p.bpg)}</td>
+          <td>${fmtPct(p.fg_pct)}</td>
+          <td>${fmtPct(p.three_pct)}</td>
+          <td>${fmtPct(p.ft_pct)}</td>
+        </tr>`
+        )
+        .join("");
+    }
+
+    function updateSortHeaders() {
+      document.querySelectorAll("th[data-sort]").forEach((th) => {
+        th.classList.remove("sorted", "sorted-asc");
+        if (th.dataset.sort === sortKey) {
+          th.classList.add(sortAsc ? "sorted-asc" : "sorted");
+        }
+      });
+    }
+
+    document.querySelectorAll("th[data-sort]").forEach((th) => {
+      th.addEventListener("click", () => {
+        const key = th.dataset.sort;
+        if (sortKey === key) {
+          sortAsc = !sortAsc;
+        } else {
+          sortKey = key;
+          sortAsc = true;
+        }
+        updateSortHeaders();
+        applyFiltersAndSort();
+      });
+    });
+
+    ["search", "filter-conference", "filter-school", "filter-position", "filter-class"].forEach(
+      (id) => {
+        document.getElementById(id).addEventListener("input", applyFiltersAndSort);
+      }
+    );
+
+    (async function init() {
+      try {
+        allPlayers = await fetchAllPlayers();
+        populateFilterOptions();
+        updateSortHeaders();
+        applyFiltersAndSort();
+      } catch (e) {
+        document.getElementById("status-line").textContent =
+          "Failed to load players: " + e.message;
+        console.error(e);
+      }
+    })();
+  </script>
+</body>
+</html>
