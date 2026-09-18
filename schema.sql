@@ -12,6 +12,7 @@ create table if not exists players (
   height text,
   weight text,
   record text,
+  espn_player_id text,
   gp numeric,
   "min" numeric,
   ppg numeric,
@@ -25,6 +26,8 @@ create table if not exists players (
   ft_pct numeric,
   last_updated timestamptz default now()
 );
+
+alter table players add column if not exists espn_player_id text;
 
 create table if not exists reports (
   id uuid primary key default gen_random_uuid(),

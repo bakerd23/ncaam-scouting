@@ -13,12 +13,18 @@ confirmed against both `requests` and bare `curl` with full browser-style header
 both from GitHub Actions runners specifically. A real browser executes that challenge
 transparently, the same way it would for any ordinary site visitor.
 
-Career history (the career_stats upsert) uses a different pair of ESPN JSON endpoints
-(site.api.espn.com's team roster API and site.web.api.espn.com's athlete stats API).
-These aren't behind the WAF challenge above, but they do block Python's `requests`
-specifically (every call 403'd in a full production run) while a bare `curl` with no
-custom headers - not even a spoofed User-Agent - gets through cleanly. So these also
-shell out to curl, just without the browser-header dressing the WAF-protected pages need.
+Every player's real ESPN athlete ID is recovered from the roster/stats pages' own
+profile links (pandas.read_html drops them, so a parallel BeautifulSoup pass pulls the
+href instead) - no separate ID-lookup request needed, and it covers players who've
+already left the roster too, since the stats page still lists them for games already
+played even after the roster page drops them.
+
+Career history (the career_stats upsert) uses a separate ESPN JSON endpoint
+(site.web.api.espn.com's athlete stats API) keyed on that ID. It isn't behind the WAF
+challenge above, but it does block Python's `requests` specifically (every call 403'd in
+a full production run) while a bare `curl` with no custom headers - not even a spoofed
+User-Agent - gets through cleanly. So this also shells out to curl, just without the
+browser-header dressing the WAF-protected pages need.
 
 Career history only runs when INCLUDE_CAREER_STATS is set (see below) - past seasons
 never change, so there's no reason to re-fetch 5,000+ players' full histories on every
@@ -51,10 +57,6 @@ STANDINGS_URL = "https://www.espn.com/mens-college-basketball/standings"
 ROSTER_URL = "https://www.espn.com/mens-college-basketball/team/roster/_/id/{team_id}"
 STATS_URL = "https://www.espn.com/mens-college-basketball/team/stats/_/id/{team_id}"
 
-ROSTER_JSON_URL = (
-    "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball"
-    "/teams/{team_id}/roster"
-)
 CAREER_STATS_URL = (
     "https://site.web.api.espn.com/apis/common/v3/sports/basketball/mens-college-basketball"
     "/athletes/{espn_id}/stats"
@@ -188,8 +190,30 @@ def strip_position_suffix(raw_name):
     return re.sub(r"\s+[A-Z]{1,2}$", "", raw_name).strip()
 
 
+def extract_player_ids(html, table_index):
+    """Returns a list of espn_player_id (or None) for each *data* row (rows with a <td>,
+    i.e. excluding the header row) of the given table, in document order. Both the roster
+    and stats pages link every player's name to their ESPN profile
+    (".../player/_/id/<id>/<slug>"), which pandas.read_html quietly throws away - this
+    walks the same table with BeautifulSoup to recover it. Aligns 1:1 with the
+    corresponding pandas.read_html dataframe's rows since both see the same row order.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    tables = soup.find_all("table")
+    if table_index >= len(tables):
+        return []
+    ids = []
+    for row in tables[table_index].find_all("tr"):
+        if not row.find("td"):
+            continue  # header row (uses <th>, not <td>)
+        a = row.find("a", href=re.compile(r"/player/"))
+        m = re.search(r"/id/(\d+)/", a["href"]) if a else None
+        ids.append(m.group(1) if m else None)
+    return ids
+
+
 def scrape_roster(page, team_id):
-    """Returns {player_name: {position, class, height, weight}}."""
+    """Returns {player_name: {position, class, height, weight, espn_player_id}}."""
     info = {}
     url = ROSTER_URL.format(team_id=team_id)
     try:
@@ -198,7 +222,8 @@ def scrape_roster(page, team_id):
         if not tables:
             return info
         df = tables[0]
-        for _, row in df.iterrows():
+        ids = extract_player_ids(html, 0)
+        for i, (_, row) in enumerate(df.iterrows()):
             raw_name = str(row.get("Name", "")).strip()
             name = strip_jersey_number(raw_name)
             if not name or name.lower() == "nan":
@@ -208,6 +233,7 @@ def scrape_roster(page, team_id):
                 "class": str(row.get("Class", "")).strip() or None,
                 "height": str(row.get("HT", "")).strip() or None,
                 "weight": str(row.get("WT", "")).strip() or None,
+                "espn_player_id": ids[i] if i < len(ids) else None,
             }
     except Exception as e:
         print(f"    roster error ({team_id}): {e}")
@@ -215,7 +241,13 @@ def scrape_roster(page, team_id):
 
 
 def scrape_stats(page, team_id):
-    """Returns {player_name: {gp, min, ppg, rpg, apg, spg, bpg, topg, fg_pct, ft_pct, three_pct}}."""
+    """Returns {player_name: {gp, min, ppg, ..., position, espn_player_id}}.
+
+    `position` and `espn_player_id` here are a fallback source for players who've since
+    left the roster (transferred, etc.) - ESPN keeps their already-played games on this
+    stats page even after dropping them from the roster page, and this is the only page
+    that still identifies them at all once that happens.
+    """
     info = {}
     url = STATS_URL.format(team_id=team_id)
     try:
@@ -224,14 +256,16 @@ def scrape_stats(page, team_id):
         if len(tables) < 2:
             return info
         names_df, stats_df = tables[0], tables[1]
+        ids = extract_player_ids(html, 0)
         n = min(len(names_df), len(stats_df))
         for i in range(n):
             raw_name = str(names_df.iloc[i, 0]).strip()
             if not raw_name or raw_name.lower() in ("nan", "total"):
                 continue
             name = strip_position_suffix(raw_name)
+            position = raw_name[len(name) :].strip() or None
             row = stats_df.iloc[i]
-            stat_row = {}
+            stat_row = {"position": position, "espn_player_id": ids[i] if i < len(ids) else None}
             for espn_col, our_col in STAT_COLUMN_MAP.items():
                 if espn_col in stats_df.columns:
                     stat_row[our_col] = _num(row.get(espn_col))
@@ -239,22 +273,6 @@ def scrape_stats(page, team_id):
     except Exception as e:
         print(f"    stats error ({team_id}): {e}")
     return info
-
-
-def get_espn_player_ids(team_id):
-    """Returns {player_name: espn_player_id} via ESPN's roster JSON API."""
-    try:
-        data = curl_get_json(ROSTER_JSON_URL.format(team_id=team_id))
-        out = {}
-        for a in data.get("athletes", []):
-            name = a.get("fullName")
-            espn_id = a.get("id")
-            if name and espn_id:
-                out[name] = espn_id
-        return out
-    except Exception as e:
-        print(f"    espn player id lookup error ({team_id}): {e}")
-        return {}
 
 
 def get_career_stats(espn_id):
@@ -321,11 +339,12 @@ def scrape_team(page, team):
                 "name": name,
                 "school": team_name,
                 "conference": conference,
-                "position": r_info.get("position"),
+                "position": r_info.get("position") or s_info.get("position"),
                 "class": r_info.get("class"),
                 "height": r_info.get("height"),
                 "weight": r_info.get("weight"),
                 "record": record,
+                "espn_player_id": r_info.get("espn_player_id") or s_info.get("espn_player_id"),
                 "gp": s_info.get("gp"),
                 "min": s_info.get("min"),
                 "ppg": s_info.get("ppg"),
@@ -361,10 +380,9 @@ def upsert_career_stats(client, rows):
     ).execute()
 
 
-def scrape_and_upsert_career_stats(client, team_id, roster_rows):
-    espn_ids = get_espn_player_ids(team_id)
+def scrape_and_upsert_career_stats(client, roster_rows):
     for row in roster_rows:
-        espn_id = espn_ids.get(row["name"])
+        espn_id = row.get("espn_player_id")
         if not espn_id:
             continue
         seasons = get_career_stats(espn_id)
@@ -421,7 +439,7 @@ def main():
             upsert_players(client, rows)
             total_players += len(rows)
             if include_career_stats:
-                scrape_and_upsert_career_stats(client, team["team_id"], rows)
+                scrape_and_upsert_career_stats(client, rows)
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         browser.close()
