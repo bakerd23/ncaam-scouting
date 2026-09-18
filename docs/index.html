@@ -188,6 +188,17 @@
 
     document.getElementById("add-filter-btn").addEventListener("click", addFilterRow);
 
+    const NAME_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv", "v"]);
+    function lastNameOf(fullName) {
+      if (!fullName) return "";
+      const parts = fullName.trim().split(/\s+/);
+      let idx = parts.length - 1;
+      while (idx > 0 && NAME_SUFFIXES.has(parts[idx].toLowerCase().replace(/\.$/, ""))) {
+        idx--;
+      }
+      return parts[idx] || "";
+    }
+
     function heightToInches(raw) {
       if (!raw) return NaN;
       const m = String(raw).match(/(\d+)'?\s*(\d+)?/);
@@ -272,8 +283,8 @@
       });
 
       rows.sort((a, b) => {
-        const av = a[sortKey];
-        const bv = b[sortKey];
+        const av = sortKey === "name" ? lastNameOf(a.name) : a[sortKey];
+        const bv = sortKey === "name" ? lastNameOf(b.name) : b[sortKey];
         const an = av === null || av === undefined;
         const bn = bv === null || bv === undefined;
         if (an && bn) return 0;
