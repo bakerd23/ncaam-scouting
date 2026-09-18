@@ -1,0 +1,15 @@
+name: Test ESPN API from Actions
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test roster JSON API
+        run: |
+          curl -s -o /dev/null -w "roster API: HTTP %{http_code}\n" "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/259/roster"
+          curl -s -o /dev/null -w "career API: HTTP %{http_code}\n" "https://site.web.api.espn.com/apis/common/v3/sports/basketball/mens-college-basketball/athletes/5177040/stats"
+          echo "--- roster body ---"
+          curl -s "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/259/roster" | head -c 300
+          echo ""
+          echo "--- career body ---"
+          curl -s "https://site.web.api.espn.com/apis/common/v3/sports/basketball/mens-college-basketball/athletes/5177040/stats" | head -c 300
