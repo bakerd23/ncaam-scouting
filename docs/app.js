@@ -47,6 +47,16 @@ async function fetchReports(playerId) {
   return data || [];
 }
 
+async function fetchCareerStats(playerId) {
+  const { data, error } = await supabaseClient
+    .from("career_stats")
+    .select("*")
+    .eq("player_id", playerId)
+    .order("season_year", { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
 async function submitReport(report) {
   const { error } = await supabaseClient.from("reports").insert(report);
   if (error) throw error;

@@ -26,7 +26,54 @@
   <script src="config.js"></script>
   <script src="app.js"></script>
   <script>
-    function renderPlayer(p, reports, loggedIn) {
+    function renderCareerTable(career) {
+      if (career.length === 0) {
+        return '<p class="player-meta">No career history on file for this player.</p>';
+      }
+      const rows = career
+        .map(
+          (s) => `
+        <tr>
+          <td>${escapeHtml(s.season_display)}</td>
+          <td>${escapeHtml(s.school)}</td>
+          <td>${fmtStat(s.gp, 0)}</td>
+          <td>${fmtStat(s.min)}</td>
+          <td>${fmtStat(s.ppg)}</td>
+          <td>${fmtStat(s.rpg)}</td>
+          <td>${fmtStat(s.apg)}</td>
+          <td>${fmtStat(s.spg)}</td>
+          <td>${fmtStat(s.bpg)}</td>
+          <td>${fmtPct(s.fg_pct)}</td>
+          <td>${fmtPct(s.three_pct)}</td>
+          <td>${fmtPct(s.ft_pct)}</td>
+        </tr>`
+        )
+        .join("");
+      return `
+        <div style="overflow-x:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Season</th>
+                <th>School</th>
+                <th>GP</th>
+                <th>MIN</th>
+                <th>PPG</th>
+                <th>RPG</th>
+                <th>APG</th>
+                <th>SPG</th>
+                <th>BPG</th>
+                <th>FG%</th>
+                <th>3P%</th>
+                <th>FT%</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }
+
+    function renderPlayer(p, reports, loggedIn, career) {
       const content = document.getElementById("content");
       const reportsSection = loggedIn
         ? `
@@ -73,6 +120,11 @@
           <a class="btn" href="report.html?id=${encodeURIComponent(p.player_id)}">Add a Scouting Report</a>
         </div>
 
+        <div class="card">
+          <h2 style="margin-top:0;">Career History</h2>
+          ${renderCareerTable(career)}
+        </div>
+
         ${reportsSection}
       `;
     }
@@ -107,15 +159,16 @@
       try {
         const session = await getSession();
         const canViewReports = !!session || !window.REQUIRE_LOGIN_FOR_REPORTS;
-        const [player, reports] = await Promise.all([
+        const [player, reports, career] = await Promise.all([
           fetchPlayer(id),
           canViewReports ? fetchReports(id) : Promise.resolve([]),
+          fetchCareerStats(id),
         ]);
         if (!player) {
           content.innerHTML = '<p class="status-line">Player not found.</p>';
           return;
         }
-        renderPlayer(player, reports, canViewReports);
+        renderPlayer(player, reports, canViewReports, career);
       } catch (e) {
         content.innerHTML = `<p class="status-line">Failed to load player: ${escapeHtml(e.message)}</p>`;
         console.error(e);

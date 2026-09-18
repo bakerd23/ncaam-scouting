@@ -40,15 +40,42 @@ create table if not exists reports (
   submitted_at timestamptz default now()
 );
 
+create table if not exists career_stats (
+  id uuid primary key default gen_random_uuid(),
+  player_id text references players(player_id) on delete cascade,
+  espn_player_id text,
+  season_year integer,
+  season_display text,
+  school text,
+  gp numeric,
+  "min" numeric,
+  ppg numeric,
+  rpg numeric,
+  apg numeric,
+  spg numeric,
+  bpg numeric,
+  topg numeric,
+  fg_pct numeric,
+  three_pct numeric,
+  ft_pct numeric,
+  unique (player_id, season_year, school)
+);
+
 create index if not exists reports_player_id_idx on reports(player_id);
 create index if not exists players_school_idx on players(school);
 create index if not exists players_conference_idx on players(conference);
+create index if not exists career_stats_player_id_idx on career_stats(player_id);
 
 alter table players enable row level security;
 alter table reports enable row level security;
+alter table career_stats enable row level security;
 
 drop policy if exists "players readable by anyone" on players;
 create policy "players readable by anyone" on players
+  for select using (true);
+
+drop policy if exists "career_stats readable by anyone" on career_stats;
+create policy "career_stats readable by anyone" on career_stats
   for select using (true);
 
 -- DEMO MODE (current live state): reports are publicly readable, same as players, so the
@@ -72,7 +99,8 @@ drop policy if exists "anyone can submit a report" on reports;
 create policy "anyone can submit a report" on reports
   for insert with check (true);
 
--- Deliberately no insert/update/delete policy on `players` for the public (anon) role, and no
--- update/delete policy on `reports` either. Player rows are written only by the daily scraper
--- using the service_role key, which bypasses RLS entirely. Scouts can only ever add new reports,
--- never edit or delete existing ones (or other players' data) from the public site.
+-- Deliberately no insert/update/delete policy on `players` or `career_stats` for the public
+-- (anon) role, and no update/delete policy on `reports` either. Both `players` and
+-- `career_stats` are written only by the daily scraper using the service_role key, which
+-- bypasses RLS entirely. Scouts can only ever add new reports, never edit or delete existing
+-- ones (or any player/career data) from the public site.

@@ -13,6 +13,11 @@ confirmed against both `requests` and bare `curl` with full browser-style header
 both from GitHub Actions runners specifically. A real browser executes that challenge
 transparently, the same way it would for any ordinary site visitor.
 
+Career history (scraper/scrape_espn.py's career_stats upsert) uses a different pair of
+ESPN JSON endpoints (site.api.espn.com's team roster API and site.web.api.espn.com's
+athlete stats API) that are NOT behind that same WAF - confirmed with plain curl from
+a GitHub Actions runner - so those go through plain `requests`, no browser needed.
+
 Env vars required:
   SUPABASE_URL
   SUPABASE_SERVICE_KEY   (service_role key - bypasses RLS, never expose to the browser)
@@ -29,6 +34,7 @@ from datetime import datetime, timezone
 from io import StringIO
 
 import pandas as pd
+import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 from supabase import create_client
@@ -37,10 +43,39 @@ STANDINGS_URL = "https://www.espn.com/mens-college-basketball/standings"
 ROSTER_URL = "https://www.espn.com/mens-college-basketball/team/roster/_/id/{team_id}"
 STATS_URL = "https://www.espn.com/mens-college-basketball/team/stats/_/id/{team_id}"
 
+ROSTER_JSON_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball"
+    "/teams/{team_id}/roster"
+)
+CAREER_STATS_URL = (
+    "https://site.web.api.espn.com/apis/common/v3/sports/basketball/mens-college-basketball"
+    "/athletes/{espn_id}/stats"
+)
+
+UA_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+}
+JSON_REQUEST_TIMEOUT = 20
+SLEEP_BETWEEN_PLAYERS = 0.1
+
 PAGE_TIMEOUT_MS = 30000
 SLEEP_BETWEEN_TEAMS = 0.3
 
 STAT_COLUMN_MAP = {
+    "GP": "gp",
+    "MIN": "min",
+    "PTS": "ppg",
+    "REB": "rpg",
+    "AST": "apg",
+    "STL": "spg",
+    "BLK": "bpg",
+    "TO": "topg",
+    "FG%": "fg_pct",
+    "FT%": "ft_pct",
+    "3P%": "three_pct",
+}
+
+CAREER_STAT_LABEL_MAP = {
     "GP": "gp",
     "MIN": "min",
     "PTS": "ppg",
@@ -185,6 +220,74 @@ def scrape_stats(page, team_id):
     return info
 
 
+def get_espn_player_ids(team_id):
+    """Returns {player_name: espn_player_id} via ESPN's roster JSON API."""
+    try:
+        r = requests.get(
+            ROSTER_JSON_URL.format(team_id=team_id),
+            headers=UA_HEADERS,
+            timeout=JSON_REQUEST_TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json()
+        out = {}
+        for a in data.get("athletes", []):
+            name = a.get("fullName")
+            espn_id = a.get("id")
+            if name and espn_id:
+                out[name] = espn_id
+        return out
+    except Exception as e:
+        print(f"    espn player id lookup error ({team_id}): {e}")
+        return {}
+
+
+def get_career_stats(espn_id):
+    """Returns a list of season dicts (season_year, season_display, school, gp, ppg, ...)."""
+    try:
+        r = requests.get(
+            CAREER_STATS_URL.format(espn_id=espn_id),
+            headers=UA_HEADERS,
+            timeout=JSON_REQUEST_TIMEOUT,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        avg_cat = next(
+            (c for c in data.get("categories", []) if c.get("name") == "averages"), None
+        )
+        if not avg_cat:
+            return []
+
+        labels = avg_cat.get("labels", [])
+        school_by_team_id = {
+            info.get("id"): info.get("displayName")
+            for info in data.get("teams", {}).values()
+            if info.get("id")
+        }
+
+        seasons = []
+        for row in avg_cat.get("statistics", []):
+            season = row.get("season", {})
+            team_id = str(row.get("teamId", ""))
+            stat_map = dict(zip(labels, row.get("stats", [])))
+            seasons.append(
+                {
+                    "season_year": season.get("year"),
+                    "season_display": season.get("displayName"),
+                    "school": school_by_team_id.get(team_id, ""),
+                    **{
+                        our_col: _num(stat_map.get(espn_label))
+                        for espn_label, our_col in CAREER_STAT_LABEL_MAP.items()
+                    },
+                }
+            )
+        return seasons
+    except Exception as e:
+        print(f"    career stats error ({espn_id}): {e}")
+        return []
+
+
 def scrape_team(page, team):
     team_id, team_name, conference, record = (
         team["team_id"],
@@ -241,6 +344,30 @@ def upsert_players(client, rows):
         client.table("players").upsert(chunk, on_conflict="player_id").execute()
 
 
+def upsert_career_stats(client, rows):
+    if not rows:
+        return
+    client.table("career_stats").upsert(
+        rows, on_conflict="player_id,season_year,school"
+    ).execute()
+
+
+def scrape_and_upsert_career_stats(client, team_id, roster_rows):
+    espn_ids = get_espn_player_ids(team_id)
+    for row in roster_rows:
+        espn_id = espn_ids.get(row["name"])
+        if not espn_id:
+            continue
+        seasons = get_career_stats(espn_id)
+        if seasons:
+            career_rows = [
+                {"player_id": row["player_id"], "espn_player_id": espn_id, **s}
+                for s in seasons
+            ]
+            upsert_career_stats(client, career_rows)
+        time.sleep(SLEEP_BETWEEN_PLAYERS)
+
+
 def main():
     supabase_url = os.environ.get("SUPABASE_URL", "").strip()
     supabase_key = os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
@@ -274,6 +401,7 @@ def main():
             rows = scrape_team(page, team)
             upsert_players(client, rows)
             total_players += len(rows)
+            scrape_and_upsert_career_stats(client, team["team_id"], rows)
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         browser.close()
