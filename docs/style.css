@@ -283,6 +283,24 @@ tbody tr:hover {
   font-size: 12px;
 }
 
+.report-count-pill {
+  display: inline-block;
+  min-width: 20px;
+  text-align: center;
+  background: var(--accent);
+  color: #101820;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 12px;
+}
+.report-count-pill.zero {
+  background: var(--panel-2);
+  color: var(--text-dim);
+  font-weight: 500;
+  border: 1px solid var(--border);
+}
+
 .report-field {
   margin-top: 6px;
   font-size: 14px;

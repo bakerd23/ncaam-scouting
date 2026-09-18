@@ -47,6 +47,7 @@
             <th data-sort="fg_pct">FG%</th>
             <th data-sort="three_pct">3P%</th>
             <th data-sort="ft_pct">FT%</th>
+            <th data-sort="report_count">Reports</th>
           </tr>
         </thead>
         <tbody id="players-tbody"></tbody>
@@ -63,6 +64,7 @@
     let sortAsc = true;
     let dynamicFilters = [];
     let filterIdCounter = 0;
+    let canViewReports = true;
 
     // Ported from the Moats/transfer-portal roster board's dynamic filter builder: pick a
     // stat, a comparison, and a value, stack as many as you want. Height/weight/record need
@@ -84,6 +86,7 @@
       { value: "fg_pct", label: "FG%", type: "number" },
       { value: "three_pct", label: "3P%", type: "number" },
       { value: "ft_pct", label: "FT%", type: "number" },
+      { value: "report_count", label: "Reports", type: "number" },
     ];
 
     function populateFilterOptions() {
@@ -286,6 +289,13 @@
         `${rows.length} of ${allPlayers.length} players`;
     }
 
+    function renderReportCountCell(count) {
+      if (!canViewReports) return '<span class="player-meta">—</span>';
+      const n = count || 0;
+      const cls = n > 0 ? "report-count-pill" : "report-count-pill zero";
+      return `<span class="${cls}">${n}</span>`;
+    }
+
     function renderRows(rows) {
       const tbody = document.getElementById("players-tbody");
       tbody.innerHTML = rows
@@ -305,6 +315,7 @@
           <td>${fmtPct(p.fg_pct)}</td>
           <td>${fmtPct(p.three_pct)}</td>
           <td>${fmtPct(p.ft_pct)}</td>
+          <td>${renderReportCountCell(p.report_count)}</td>
         </tr>`
         )
         .join("");
@@ -342,7 +353,16 @@
     (async function init() {
       renderAuthNav();
       try {
-        allPlayers = await fetchAllPlayers();
+        const session = await getSession();
+        canViewReports = !!session || !window.REQUIRE_LOGIN_FOR_REPORTS;
+        const [players, reportCounts] = await Promise.all([
+          fetchAllPlayers(),
+          canViewReports ? fetchReportCounts() : Promise.resolve({}),
+        ]);
+        allPlayers = players.map((p) => ({
+          ...p,
+          report_count: reportCounts[p.player_id] || 0,
+        }));
         populateFilterOptions();
         updateSortHeaders();
         applyFiltersAndSort();

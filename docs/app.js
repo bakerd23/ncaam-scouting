@@ -57,6 +57,29 @@ async function fetchCareerStats(playerId) {
   return data || [];
 }
 
+async function fetchReportCounts() {
+  // Just the player_id column, paginated - lets index.html show a report count per player
+  // without pulling every report's full content.
+  const pageSize = 1000;
+  let all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabaseClient
+      .from("reports")
+      .select("player_id")
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  const counts = {};
+  for (const r of all) {
+    counts[r.player_id] = (counts[r.player_id] || 0) + 1;
+  }
+  return counts;
+}
+
 async function submitReport(report) {
   const { error } = await supabaseClient.from("reports").insert(report);
   if (error) throw error;
