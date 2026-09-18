@@ -12,6 +12,7 @@
     <nav>
       <a href="index.html">Players</a>
       <a href="report.html">Submit a Report</a>
+      <span id="auth-nav-slot"></span>
     </nav>
   </header>
 
@@ -339,6 +340,7 @@
     );
 
     (async function init() {
+      renderAuthNav();
       try {
         allPlayers = await fetchAllPlayers();
         populateFilterOptions();

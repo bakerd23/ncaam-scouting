@@ -12,6 +12,7 @@
     <nav>
       <a href="index.html">Players</a>
       <a href="report.html">Submit a Report</a>
+      <span id="auth-nav-slot"></span>
     </nav>
   </header>
 
@@ -25,8 +26,27 @@
   <script src="config.js"></script>
   <script src="app.js"></script>
   <script>
-    function renderPlayer(p, reports) {
+    function renderPlayer(p, reports, loggedIn) {
       const content = document.getElementById("content");
+      const reportsSection = loggedIn
+        ? `
+        <div class="card">
+          <h2 style="margin-top:0;">Scouting Reports (${reports.length})</h2>
+          <div id="reports-list">
+            ${
+              reports.length === 0
+                ? '<p class="player-meta">No reports yet for this player.</p>'
+                : reports.map(renderReportCard).join("")
+            }
+          </div>
+        </div>`
+        : `
+        <div class="card">
+          <h2 style="margin-top:0;">Scouting Reports</h2>
+          <p class="player-meta">Scouting reports are only visible to signed-in accounts.
+            <a href="login.html?return=${encodeURIComponent("player.html?id=" + p.player_id)}">Log in</a> to view them.</p>
+        </div>`;
+
       content.innerHTML = `
         <div class="card">
           <div class="player-heading">
@@ -53,16 +73,7 @@
           <a class="btn" href="report.html?id=${encodeURIComponent(p.player_id)}">Add a Scouting Report</a>
         </div>
 
-        <div class="card">
-          <h2 style="margin-top:0;">Scouting Reports (${reports.length})</h2>
-          <div id="reports-list">
-            ${
-              reports.length === 0
-                ? '<p class="player-meta">No reports yet for this player.</p>'
-                : reports.map(renderReportCard).join("")
-            }
-          </div>
-        </div>
+        ${reportsSection}
       `;
     }
 
@@ -86,6 +97,7 @@
     }
 
     (async function init() {
+      renderAuthNav();
       const id = qs("id");
       const content = document.getElementById("content");
       if (!id) {
@@ -93,12 +105,16 @@
         return;
       }
       try {
-        const [player, reports] = await Promise.all([fetchPlayer(id), fetchReports(id)]);
+        const session = await getSession();
+        const [player, reports] = await Promise.all([
+          fetchPlayer(id),
+          session ? fetchReports(id) : Promise.resolve([]),
+        ]);
         if (!player) {
           content.innerHTML = '<p class="status-line">Player not found.</p>';
           return;
         }
-        renderPlayer(player, reports);
+        renderPlayer(player, reports, !!session);
       } catch (e) {
         content.innerHTML = `<p class="status-line">Failed to load player: ${escapeHtml(e.message)}</p>`;
         console.error(e);

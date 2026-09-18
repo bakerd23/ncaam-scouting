@@ -52,6 +52,33 @@ async function submitReport(report) {
   if (error) throw error;
 }
 
+async function getSession() {
+  const { data, error } = await supabaseClient.auth.getSession();
+  if (error) throw error;
+  return data.session;
+}
+
+async function signOut() {
+  await supabaseClient.auth.signOut();
+}
+
+// Adds a Log in / Log out link to a page's nav (id="auth-nav-slot") based on session state.
+async function renderAuthNav() {
+  const slot = document.getElementById("auth-nav-slot");
+  if (!slot) return;
+  const session = await getSession();
+  if (session) {
+    slot.innerHTML = `<a href="#" id="logout-link">Log out</a>`;
+    document.getElementById("logout-link").addEventListener("click", async (e) => {
+      e.preventDefault();
+      await signOut();
+      window.location.reload();
+    });
+  } else {
+    slot.innerHTML = `<a href="login.html">Log in</a>`;
+  }
+}
+
 function fmtStat(v, decimals = 1) {
   if (v === null || v === undefined || v === "") return "—";
   const n = Number(v);

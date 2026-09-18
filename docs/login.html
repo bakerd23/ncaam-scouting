@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Log In</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>College Basketball Scouting Database</h1>
+    <nav>
+      <a href="index.html">Players</a>
+      <a href="report.html">Submit a Report</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="card" style="max-width: 420px;">
+      <h1 style="margin-top:0;">Log In</h1>
+      <p class="player-meta">Scouting reports are only visible to signed-in accounts.</p>
+
+      <form class="report-form" id="login-form">
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="text" id="email" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" autocomplete="current-password" required />
+        </div>
+        <div>
+          <button type="submit" class="btn" id="login-btn">Log In</button>
+        </div>
+        <div id="login-msg"></div>
+      </form>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+  <script>
+    (async function init() {
+      // Already signed in? Skip straight to the return destination.
+      const session = await getSession();
+      if (session) {
+        window.location.href = qs("return") || "index.html";
+      }
+    })();
+
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("login-msg");
+      msg.innerHTML = "";
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      const btn = document.getElementById("login-btn");
+      btn.disabled = true;
+      btn.textContent = "Logging in...";
+      try {
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        window.location.href = qs("return") || "index.html";
+      } catch (err) {
+        msg.innerHTML = `<div class="msg error">${escapeHtml(err.message)}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Log In";
+      }
+    });
+  </script>
+</body>
+</html>
