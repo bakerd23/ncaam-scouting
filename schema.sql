@@ -36,9 +36,14 @@ create table if not exists reports (
   strengths text,
   weaknesses text,
   projection text,
+  confidence_level numeric,      -- 1-5, how many/how well the scout saw this player
+  would_recommend text,          -- 'Yes' | 'No' | 'Maybe'
   notes text,
   submitted_at timestamptz default now()
 );
+
+alter table reports add column if not exists confidence_level numeric;
+alter table reports add column if not exists would_recommend text;
 
 create table if not exists career_stats (
   id uuid primary key default gen_random_uuid(),

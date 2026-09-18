@@ -369,3 +369,149 @@ textarea {
   padding: 10px 12px;
   font-size: 14px;
 }
+
+.form-card {
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
+}
+
+.field-hint {
+  font-weight: 400;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+/* Star rating */
+.star-rating {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+.star-rating .star {
+  background: none;
+  border: none;
+  color: var(--border);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+}
+.star-rating .star.filled {
+  color: var(--accent);
+}
+
+/* Segmented control */
+.segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.segmented button {
+  flex: 1 1 auto;
+  padding: 8px 12px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.segmented button:hover {
+  border-color: var(--accent-dim);
+}
+.segmented button.active {
+  background: var(--accent);
+  color: #101820;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Chip multi-select */
+.chip-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.chip {
+  background: var(--panel-2);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.chip:hover {
+  border-color: var(--accent-dim);
+}
+.chip.selected {
+  background: var(--accent);
+  color: #101820;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.chip-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.chip-add input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Range slider */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.slider-row input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+.slider-value {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  min-width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 13px;
+}
+.slider-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* Radio group */
+.radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 8px 0;
+}
+.radio-group label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+}
+.radio-group input[type="radio"] {
+  accent-color: var(--accent);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}

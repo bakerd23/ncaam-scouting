@@ -143,6 +143,8 @@
           ${field("Projection", r.projection)}
           ${field("Strengths", r.strengths)}
           ${field("Weaknesses", r.weaknesses)}
+          ${field("Confidence", r.confidence_level ? `${r.confidence_level}/5` : "")}
+          ${field("Recommend for follow-up", r.would_recommend)}
           ${field("Notes", r.notes)}
         </div>
       `;
