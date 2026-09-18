@@ -106,15 +106,16 @@
       }
       try {
         const session = await getSession();
+        const canViewReports = !!session || !window.REQUIRE_LOGIN_FOR_REPORTS;
         const [player, reports] = await Promise.all([
           fetchPlayer(id),
-          session ? fetchReports(id) : Promise.resolve([]),
+          canViewReports ? fetchReports(id) : Promise.resolve([]),
         ]);
         if (!player) {
           content.innerHTML = '<p class="status-line">Player not found.</p>';
           return;
         }
-        renderPlayer(player, reports, !!session);
+        renderPlayer(player, reports, canViewReports);
       } catch (e) {
         content.innerHTML = `<p class="status-line">Failed to load player: ${escapeHtml(e.message)}</p>`;
         console.error(e);
