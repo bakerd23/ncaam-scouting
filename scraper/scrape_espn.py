@@ -13,20 +13,24 @@ confirmed against both `requests` and bare `curl` with full browser-style header
 both from GitHub Actions runners specifically. A real browser executes that challenge
 transparently, the same way it would for any ordinary site visitor.
 
-Career history (scraper/scrape_espn.py's career_stats upsert) uses a different pair of
-ESPN JSON endpoints (site.api.espn.com's team roster API and site.web.api.espn.com's
-athlete stats API). These aren't behind the WAF challenge above, but they do block
-Python's `requests` specifically (every call 403'd in a full production run) while a bare
-`curl` with no custom headers - not even a spoofed User-Agent - gets through cleanly. So
-these also shell out to curl, just without the browser-header dressing the WAF-protected
-pages need.
+Career history (the career_stats upsert) uses a different pair of ESPN JSON endpoints
+(site.api.espn.com's team roster API and site.web.api.espn.com's athlete stats API).
+These aren't behind the WAF challenge above, but they do block Python's `requests`
+specifically (every call 403'd in a full production run) while a bare `curl` with no
+custom headers - not even a spoofed User-Agent - gets through cleanly. So these also
+shell out to curl, just without the browser-header dressing the WAF-protected pages need.
+
+Career history only runs when INCLUDE_CAREER_STATS is set (see below) - past seasons
+never change, so there's no reason to re-fetch 5,000+ players' full histories on every
+daily run. Re-run manually with it enabled whenever ESPN rolls over to a new season.
 
 Env vars required:
   SUPABASE_URL
   SUPABASE_SERVICE_KEY   (service_role key - bypasses RLS, never expose to the browser)
 
 Optional:
-  TEAM_LIMIT   - if set, only scrape the first N teams (useful for a quick local test run)
+  TEAM_LIMIT             - if set, only scrape the first N teams (quick local test run)
+  INCLUDE_CAREER_STATS   - if "1"/"true"/"yes", also fetch/upsert career history
 """
 
 import json
@@ -400,13 +404,24 @@ def main():
             teams = teams[: int(team_limit)]
             print(f"TEAM_LIMIT set, only scraping first {len(teams)} teams.")
 
+        include_career_stats = os.environ.get("INCLUDE_CAREER_STATS", "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if include_career_stats:
+            print("INCLUDE_CAREER_STATS set - also fetching career history (slower).")
+        else:
+            print("Skipping career history this run (INCLUDE_CAREER_STATS not set).")
+
         total_players = 0
         for i, team in enumerate(teams, start=1):
             print(f"[{i}/{len(teams)}] {team['name']} ({team['conference']})")
             rows = scrape_team(page, team)
             upsert_players(client, rows)
             total_players += len(rows)
-            scrape_and_upsert_career_stats(client, team["team_id"], rows)
+            if include_career_stats:
+                scrape_and_upsert_career_stats(client, team["team_id"], rows)
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         browser.close()

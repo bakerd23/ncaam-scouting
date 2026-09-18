@@ -12,6 +12,11 @@ on:
         description: 'Only scrape the first N teams (leave blank for all of D1)'
         required: false
         default: ''
+      include_career_stats:
+        description: 'Also fetch career history (slow, and history only changes when ESPN rolls over to a new season - leave off for routine daily runs)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   update-stats:
@@ -37,6 +42,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           TEAM_LIMIT: ${{ github.event.inputs.team_limit }}
+          INCLUDE_CAREER_STATS: ${{ github.event.inputs.include_career_stats }}
         run: python scraper/scrape_espn.py
 
       - name: Notify on failure
