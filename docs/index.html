@@ -16,7 +16,7 @@
     </nav>
   </header>
 
-  <main>
+  <main class="wide">
     <div class="controls">
       <input type="text" id="search" class="search-box" placeholder="Search player name..." />
       <select id="filter-conference"><option value="">All Conferences</option></select>
@@ -35,7 +35,6 @@
         <thead>
           <tr>
             <th data-sort="name">Player</th>
-            <th data-sort="report_count">Reports</th>
             <th data-sort="school">School</th>
             <th data-sort="conference">Conference</th>
             <th data-sort="position">Pos</th>
@@ -48,6 +47,7 @@
             <th data-sort="fg_pct">FG%</th>
             <th data-sort="three_pct">3P%</th>
             <th data-sort="ft_pct">FT%</th>
+            <th data-sort="report_count">Reports</th>
           </tr>
         </thead>
         <tbody id="players-tbody"></tbody>
@@ -303,7 +303,6 @@
           (p) => `
         <tr onclick="window.location.href='${playerLink(p.player_id)}'">
           <td>${escapeHtml(p.name)}</td>
-          <td>${renderReportCountCell(p.report_count)}</td>
           <td>${escapeHtml(p.school)}</td>
           <td>${escapeHtml(p.conference)}</td>
           <td>${escapeHtml(p.position)}</td>
@@ -316,6 +315,7 @@
           <td>${fmtPct(p.fg_pct)}</td>
           <td>${fmtPct(p.three_pct)}</td>
           <td>${fmtPct(p.ft_pct)}</td>
+          <td>${renderReportCountCell(p.report_count)}</td>
         </tr>`
         )
         .join("");
