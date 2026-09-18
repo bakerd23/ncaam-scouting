@@ -51,13 +51,22 @@ drop policy if exists "players readable by anyone" on players;
 create policy "players readable by anyone" on players
   for select using (true);
 
--- Reports are readable only by a signed-in account (the client), not the public anon key that
--- scouts use. This is the boundary that lets scouts submit blind without being able to read
--- back other scouts' reports, and without your client needing to grant them any access.
+-- DEMO MODE (current live state): reports are publicly readable, same as players, so the
+-- report-viewing gate in docs/player.html doesn't require a login yet
+-- (docs/config.js: REQUIRE_LOGIN_FOR_REPORTS = false). Anyone with the link can already read
+-- reports today - this policy isn't providing real access control in this state.
 drop policy if exists "reports readable by anyone" on reports;
 drop policy if exists "reports readable by authenticated users" on reports;
-create policy "reports readable by authenticated users" on reports
-  for select using (auth.role() = 'authenticated');
+create policy "reports readable by anyone" on reports
+  for select using (true);
+
+-- LOCKDOWN MODE (not yet applied): once the client's Supabase Auth login exists and
+-- config.js's REQUIRE_LOGIN_FOR_REPORTS flips to true, swap the policy above for this one so
+-- only a signed-in account can read reports - scouts keep submitting blind via the public
+-- insert policy below, but can no longer read back anyone's reports.
+--   drop policy if exists "reports readable by anyone" on reports;
+--   create policy "reports readable by authenticated users" on reports
+--     for select using (auth.role() = 'authenticated');
 
 drop policy if exists "anyone can submit a report" on reports;
 create policy "anyone can submit a report" on reports
@@ -66,4 +75,4 @@ create policy "anyone can submit a report" on reports
 -- Deliberately no insert/update/delete policy on `players` for the public (anon) role, and no
 -- update/delete policy on `reports` either. Player rows are written only by the daily scraper
 -- using the service_role key, which bypasses RLS entirely. Scouts can only ever add new reports,
--- never edit, delete, or read back existing ones (or other players' data) from the public site.
+-- never edit or delete existing ones (or other players' data) from the public site.
