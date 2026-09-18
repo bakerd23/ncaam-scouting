@@ -15,8 +15,11 @@ transparently, the same way it would for any ordinary site visitor.
 
 Career history (scraper/scrape_espn.py's career_stats upsert) uses a different pair of
 ESPN JSON endpoints (site.api.espn.com's team roster API and site.web.api.espn.com's
-athlete stats API) that are NOT behind that same WAF - confirmed with plain curl from
-a GitHub Actions runner - so those go through plain `requests`, no browser needed.
+athlete stats API). These aren't behind the WAF challenge above, but they do block
+Python's `requests` specifically (every call 403'd in a full production run) while a bare
+`curl` with no custom headers - not even a spoofed User-Agent - gets through cleanly. So
+these also shell out to curl, just without the browser-header dressing the WAF-protected
+pages need.
 
 Env vars required:
   SUPABASE_URL
@@ -26,15 +29,16 @@ Optional:
   TEAM_LIMIT   - if set, only scrape the first N teams (useful for a quick local test run)
 """
 
+import json
 import os
 import re
+import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from io import StringIO
 
 import pandas as pd
-import requests
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 from supabase import create_client
@@ -52,9 +56,6 @@ CAREER_STATS_URL = (
     "/athletes/{espn_id}/stats"
 )
 
-UA_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-}
 JSON_REQUEST_TIMEOUT = 20
 SLEEP_BETWEEN_PLAYERS = 0.1
 
@@ -99,6 +100,22 @@ def fetch_html(page, url):
 def slugify(s):
     s = re.sub(r"[^a-zA-Z0-9]+", "-", (s or "").strip().lower())
     return s.strip("-") or "unknown"
+
+
+def curl_get_json(url, timeout=JSON_REQUEST_TIMEOUT):
+    result = subprocess.run(
+        ["curl", "-sS", "--max-time", str(timeout), "-w", "\n%{http_code}", url],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"curl exit {result.returncode} for {url}: {result.stderr.strip()}")
+    body, _, status = result.stdout.rpartition("\n")
+    if int(status) >= 400:
+        raise RuntimeError(f"HTTP {status} for {url}")
+    return json.loads(body)
 
 
 def _num(v):
@@ -223,13 +240,7 @@ def scrape_stats(page, team_id):
 def get_espn_player_ids(team_id):
     """Returns {player_name: espn_player_id} via ESPN's roster JSON API."""
     try:
-        r = requests.get(
-            ROSTER_JSON_URL.format(team_id=team_id),
-            headers=UA_HEADERS,
-            timeout=JSON_REQUEST_TIMEOUT,
-        )
-        r.raise_for_status()
-        data = r.json()
+        data = curl_get_json(ROSTER_JSON_URL.format(team_id=team_id))
         out = {}
         for a in data.get("athletes", []):
             name = a.get("fullName")
@@ -245,13 +256,7 @@ def get_espn_player_ids(team_id):
 def get_career_stats(espn_id):
     """Returns a list of season dicts (season_year, season_display, school, gp, ppg, ...)."""
     try:
-        r = requests.get(
-            CAREER_STATS_URL.format(espn_id=espn_id),
-            headers=UA_HEADERS,
-            timeout=JSON_REQUEST_TIMEOUT,
-        )
-        r.raise_for_status()
-        data = r.json()
+        data = curl_get_json(CAREER_STATS_URL.format(espn_id=espn_id))
 
         avg_cat = next(
             (c for c in data.get("categories", []) if c.get("name") == "averages"), None
