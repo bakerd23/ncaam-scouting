@@ -8,12 +8,23 @@ const supabaseClient = window.supabase.createClient(
 );
 
 async function fetchAllPlayers() {
-  const { data, error } = await supabaseClient
-    .from("players")
-    .select("*")
-    .order("name", { ascending: true });
-  if (error) throw error;
-  return data || [];
+  // Supabase/PostgREST caps a single response at 1000 rows regardless of how many match,
+  // so page through with .range() until a page comes back short of the page size.
+  const pageSize = 1000;
+  let all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabaseClient
+      .from("players")
+      .select("*")
+      .order("name", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
 }
 
 async function fetchPlayer(playerId) {

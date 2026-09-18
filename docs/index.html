@@ -16,13 +16,17 @@
   </header>
 
   <main>
+    <div class="conference-tabs" id="conference-tabs"></div>
+
     <div class="controls">
       <input type="text" id="search" class="search-box" placeholder="Search player name..." />
-      <select id="filter-conference"><option value="">All Conferences</option></select>
       <select id="filter-school"><option value="">All Schools</option></select>
       <select id="filter-position"><option value="">All Positions</option></select>
       <select id="filter-class"><option value="">All Classes</option></select>
+      <button class="btn secondary" id="add-filter-btn" type="button">+ Add Filter</button>
     </div>
+
+    <div id="active-filters" class="active-filters"></div>
 
     <div class="status-line" id="status-line">Loading players...</div>
 
@@ -57,9 +61,33 @@
     let allPlayers = [];
     let sortKey = "name";
     let sortAsc = true;
+    let currentConference = "All";
+    let dynamicFilters = [];
+    let filterIdCounter = 0;
+
+    // Ported from the Moats/transfer-portal roster board's dynamic filter builder: pick a
+    // stat, a comparison, and a value, stack as many as you want. Height/weight/record need
+    // the same string-to-number parsing there since they're stored as raw ESPN text.
+    const STAT_OPTIONS = [
+      { value: "position", label: "Position", type: "string" },
+      { value: "class", label: "Class", type: "string" },
+      { value: "height", label: "Height", type: "height" },
+      { value: "weight", label: "Weight", type: "weight" },
+      { value: "record", label: "Win %", type: "record" },
+      { value: "gp", label: "Games Played", type: "number" },
+      { value: "min", label: "Minutes", type: "number" },
+      { value: "ppg", label: "Points", type: "number" },
+      { value: "rpg", label: "Rebounds", type: "number" },
+      { value: "apg", label: "Assists", type: "number" },
+      { value: "spg", label: "Steals", type: "number" },
+      { value: "bpg", label: "Blocks", type: "number" },
+      { value: "topg", label: "Turnovers", type: "number" },
+      { value: "fg_pct", label: "FG%", type: "number" },
+      { value: "three_pct", label: "3P%", type: "number" },
+      { value: "ft_pct", label: "FT%", type: "number" },
+    ];
 
     function populateFilterOptions() {
-      const conferences = [...new Set(allPlayers.map((p) => p.conference).filter(Boolean))].sort();
       const schools = [...new Set(allPlayers.map((p) => p.school).filter(Boolean))].sort();
       const positions = [...new Set(allPlayers.map((p) => p.position).filter(Boolean))].sort();
       const classes = [...new Set(allPlayers.map((p) => p.class).filter(Boolean))].sort();
@@ -73,16 +101,159 @@
           el.appendChild(opt);
         }
       };
-      fill("filter-conference", conferences);
       fill("filter-school", schools);
       fill("filter-position", positions);
       fill("filter-class", classes);
     }
 
+    function renderConferenceTabs() {
+      const conferences = [...new Set(allPlayers.map((p) => p.conference).filter(Boolean))].sort();
+      const container = document.getElementById("conference-tabs");
+      const makeBtn = (label) => {
+        const btn = document.createElement("button");
+        btn.textContent = label;
+        btn.className = label === currentConference ? "active" : "";
+        btn.addEventListener("click", () => {
+          currentConference = label;
+          renderConferenceTabs();
+          applyFiltersAndSort();
+        });
+        return btn;
+      };
+      container.innerHTML = "";
+      container.appendChild(makeBtn("All"));
+      conferences.forEach((c) => container.appendChild(makeBtn(c)));
+    }
+
+    function addFilterRow() {
+      const id = filterIdCounter++;
+      dynamicFilters.push({ id, stat: "ppg", comparison: ">=", value: "" });
+
+      const row = document.createElement("div");
+      row.className = "filter-row";
+      row.id = `filter-${id}`;
+      row.innerHTML = `
+        <select data-role="stat">
+          ${STAT_OPTIONS.map((o) => `<option value="${o.value}">${o.label}</option>`).join("")}
+        </select>
+        <select data-role="comparison"></select>
+        <input type="text" data-role="value" placeholder="Value" />
+        <button type="button" data-role="remove">Remove</button>
+      `;
+      document.getElementById("active-filters").appendChild(row);
+
+      const statSelect = row.querySelector('[data-role="stat"]');
+      const comparisonSelect = row.querySelector('[data-role="comparison"]');
+      const valueInput = row.querySelector('[data-role="value"]');
+
+      function comparisonOptionsFor(type) {
+        if (type === "string") return [["=", "="], ["!=", "≠"]];
+        return [
+          [">=", "≥"],
+          ["<=", "≤"],
+          ["=", "="],
+          [">", ">"],
+          ["<", "<"],
+        ];
+      }
+
+      function refreshComparisonOptions() {
+        const opt = STAT_OPTIONS.find((o) => o.value === statSelect.value);
+        const options = comparisonOptionsFor(opt ? opt.type : "number");
+        comparisonSelect.innerHTML = options
+          .map(([v, label]) => `<option value="${v}">${label}</option>`)
+          .join("");
+      }
+      refreshComparisonOptions();
+
+      const sync = () => {
+        const f = dynamicFilters.find((x) => x.id === id);
+        f.stat = statSelect.value;
+        f.comparison = comparisonSelect.value;
+        f.value = valueInput.value;
+        applyFiltersAndSort();
+      };
+      statSelect.addEventListener("change", () => {
+        refreshComparisonOptions();
+        sync();
+      });
+      comparisonSelect.addEventListener("change", sync);
+      valueInput.addEventListener("input", sync);
+      row.querySelector('[data-role="remove"]').addEventListener("click", () => {
+        dynamicFilters = dynamicFilters.filter((x) => x.id !== id);
+        row.remove();
+        applyFiltersAndSort();
+      });
+    }
+
+    document.getElementById("add-filter-btn").addEventListener("click", addFilterRow);
+
+    function heightToInches(raw) {
+      if (!raw) return NaN;
+      const m = String(raw).match(/(\d+)'?\s*(\d+)?/);
+      if (!m) return NaN;
+      return (parseInt(m[1], 10) || 0) * 12 + (parseInt(m[2], 10) || 0);
+    }
+
+    function weightToLbs(raw) {
+      if (!raw) return NaN;
+      const m = String(raw).match(/(\d+)/);
+      return m ? parseInt(m[1], 10) : NaN;
+    }
+
+    function recordToWinPct(raw) {
+      if (!raw) return NaN;
+      const parts = String(raw).split("-");
+      if (parts.length !== 2) return NaN;
+      const w = parseInt(parts[0], 10);
+      const l = parseInt(parts[1], 10);
+      if (Number.isNaN(w) || Number.isNaN(l) || w + l === 0) return NaN;
+      return w / (w + l);
+    }
+
+    function compareNumbers(playerValue, comparison, filterValue) {
+      if (Number.isNaN(playerValue) || Number.isNaN(filterValue)) return false;
+      switch (comparison) {
+        case ">=":
+          return playerValue >= filterValue;
+        case "<=":
+          return playerValue <= filterValue;
+        case "=":
+          return Math.abs(playerValue - filterValue) < 0.01;
+        case ">":
+          return playerValue > filterValue;
+        case "<":
+          return playerValue < filterValue;
+        default:
+          return true;
+      }
+    }
+
+    function playerMatchesDynamicFilter(p, f) {
+      if (!f.value) return true;
+      const opt = STAT_OPTIONS.find((o) => o.value === f.stat);
+      const type = opt ? opt.type : "number";
+
+      if (type === "string") {
+        const pv = (p[f.stat] ?? "").toString().toLowerCase();
+        const fv = f.value.toLowerCase();
+        return f.comparison === "!=" ? pv !== fv : pv === fv;
+      }
+      if (type === "height") {
+        return compareNumbers(heightToInches(p.height), f.comparison, heightToInches(f.value) || parseFloat(f.value));
+      }
+      if (type === "weight") {
+        return compareNumbers(weightToLbs(p.weight), f.comparison, parseFloat(f.value));
+      }
+      if (type === "record") {
+        return compareNumbers(recordToWinPct(p.record), f.comparison, parseFloat(f.value));
+      }
+      return compareNumbers(parseFloat(p[f.stat]), f.comparison, parseFloat(f.value));
+    }
+
     function currentFilters() {
       return {
         search: document.getElementById("search").value.trim().toLowerCase(),
-        conference: document.getElementById("filter-conference").value,
         school: document.getElementById("filter-school").value,
         position: document.getElementById("filter-position").value,
         cls: document.getElementById("filter-class").value,
@@ -92,12 +263,12 @@
     function applyFiltersAndSort() {
       const f = currentFilters();
       let rows = allPlayers.filter((p) => {
+        if (currentConference !== "All" && p.conference !== currentConference) return false;
         if (f.search && !p.name.toLowerCase().includes(f.search)) return false;
-        if (f.conference && p.conference !== f.conference) return false;
         if (f.school && p.school !== f.school) return false;
         if (f.position && p.position !== f.position) return false;
         if (f.cls && p.class !== f.cls) return false;
-        return true;
+        return dynamicFilters.every((df) => playerMatchesDynamicFilter(p, df));
       });
 
       rows.sort((a, b) => {
@@ -168,16 +339,15 @@
       });
     });
 
-    ["search", "filter-conference", "filter-school", "filter-position", "filter-class"].forEach(
-      (id) => {
-        document.getElementById(id).addEventListener("input", applyFiltersAndSort);
-      }
-    );
+    ["search", "filter-school", "filter-position", "filter-class"].forEach((id) => {
+      document.getElementById(id).addEventListener("input", applyFiltersAndSort);
+    });
 
     (async function init() {
       try {
         allPlayers = await fetchAllPlayers();
         populateFilterOptions();
+        renderConferenceTabs();
         updateSortHeaders();
         applyFiltersAndSort();
       } catch (e) {
