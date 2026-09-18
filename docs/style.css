@@ -70,36 +70,6 @@ main {
   margin-bottom: 16px;
 }
 
-.conference-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 12px;
-  margin-bottom: 16px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.conference-tabs button {
-  padding: 6px 14px;
-  background: var(--panel-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-}
-.conference-tabs button:hover {
-  border-color: var(--accent-dim);
-}
-.conference-tabs button.active {
-  background: var(--accent);
-  color: #101820;
-  border-color: var(--accent);
-}
-
 .active-filters {
   display: flex;
   flex-direction: column;

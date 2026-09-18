@@ -16,10 +16,9 @@
   </header>
 
   <main>
-    <div class="conference-tabs" id="conference-tabs"></div>
-
     <div class="controls">
       <input type="text" id="search" class="search-box" placeholder="Search player name..." />
+      <select id="filter-conference"><option value="">All Conferences</option></select>
       <select id="filter-school"><option value="">All Schools</option></select>
       <select id="filter-position"><option value="">All Positions</option></select>
       <select id="filter-class"><option value="">All Classes</option></select>
@@ -61,7 +60,6 @@
     let allPlayers = [];
     let sortKey = "name";
     let sortAsc = true;
-    let currentConference = "All";
     let dynamicFilters = [];
     let filterIdCounter = 0;
 
@@ -88,6 +86,7 @@
     ];
 
     function populateFilterOptions() {
+      const conferences = [...new Set(allPlayers.map((p) => p.conference).filter(Boolean))].sort();
       const schools = [...new Set(allPlayers.map((p) => p.school).filter(Boolean))].sort();
       const positions = [...new Set(allPlayers.map((p) => p.position).filter(Boolean))].sort();
       const classes = [...new Set(allPlayers.map((p) => p.class).filter(Boolean))].sort();
@@ -101,28 +100,10 @@
           el.appendChild(opt);
         }
       };
+      fill("filter-conference", conferences);
       fill("filter-school", schools);
       fill("filter-position", positions);
       fill("filter-class", classes);
-    }
-
-    function renderConferenceTabs() {
-      const conferences = [...new Set(allPlayers.map((p) => p.conference).filter(Boolean))].sort();
-      const container = document.getElementById("conference-tabs");
-      const makeBtn = (label) => {
-        const btn = document.createElement("button");
-        btn.textContent = label;
-        btn.className = label === currentConference ? "active" : "";
-        btn.addEventListener("click", () => {
-          currentConference = label;
-          renderConferenceTabs();
-          applyFiltersAndSort();
-        });
-        return btn;
-      };
-      container.innerHTML = "";
-      container.appendChild(makeBtn("All"));
-      conferences.forEach((c) => container.appendChild(makeBtn(c)));
     }
 
     function addFilterRow() {
@@ -265,6 +246,7 @@
     function currentFilters() {
       return {
         search: document.getElementById("search").value.trim().toLowerCase(),
+        conference: document.getElementById("filter-conference").value,
         school: document.getElementById("filter-school").value,
         position: document.getElementById("filter-position").value,
         cls: document.getElementById("filter-class").value,
@@ -274,7 +256,7 @@
     function applyFiltersAndSort() {
       const f = currentFilters();
       let rows = allPlayers.filter((p) => {
-        if (currentConference !== "All" && p.conference !== currentConference) return false;
+        if (f.conference && p.conference !== f.conference) return false;
         if (f.search && !p.name.toLowerCase().includes(f.search)) return false;
         if (f.school && p.school !== f.school) return false;
         if (f.position && p.position !== f.position) return false;
@@ -350,15 +332,16 @@
       });
     });
 
-    ["search", "filter-school", "filter-position", "filter-class"].forEach((id) => {
-      document.getElementById(id).addEventListener("input", applyFiltersAndSort);
-    });
+    ["search", "filter-conference", "filter-school", "filter-position", "filter-class"].forEach(
+      (id) => {
+        document.getElementById(id).addEventListener("input", applyFiltersAndSort);
+      }
+    );
 
     (async function init() {
       try {
         allPlayers = await fetchAllPlayers();
         populateFilterOptions();
-        renderConferenceTabs();
         updateSortHeaders();
         applyFiltersAndSort();
       } catch (e) {
