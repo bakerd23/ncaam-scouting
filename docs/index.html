@@ -68,7 +68,20 @@
   <script>
     let allPlayers = [];
     let basePlayers = []; // players as loaded, with full-season stats
-    let hmSplits = null; // player_id -> "vs_hm" split row, loaded on first toggle
+    let hmSplits = null; // player_id -> "vs_hm" split row
+    // Started in the background as soon as the player list is up, so the toggle is usually
+    // instant; a click before it finishes just waits on the same request.
+    let hmSplitsPromise = null;
+
+    function loadHmSplits() {
+      if (!hmSplitsPromise) {
+        hmSplitsPromise = fetchAllSplits("vs_hm").catch((err) => {
+          hmSplitsPromise = null; // let the next click retry
+          throw err;
+        });
+      }
+      return hmSplitsPromise;
+    }
     let hmOnly = false;
     let sortKey = "name";
     let sortAsc = true;
@@ -397,7 +410,7 @@
       if (!hmSplits) {
         btn.disabled = true;
         try {
-          hmSplits = await fetchAllSplits("vs_hm");
+          hmSplits = await loadHmSplits();
         } catch (err) {
           document.getElementById("status-line").textContent =
             "Failed to load High/Mid Major stats: " + err.message;
@@ -438,6 +451,7 @@
         populateFilterOptions();
         updateSortHeaders();
         applyFiltersAndSort();
+        loadHmSplits().catch((err) => console.error(err)); // background preload
       } catch (e) {
         document.getElementById("status-line").textContent =
           "Failed to load players: " + e.message;

@@ -7,24 +7,33 @@ const supabaseClient = window.supabase.createClient(
   window.SUPABASE_ANON_KEY
 );
 
-async function fetchAllPlayers() {
-  // Supabase/PostgREST caps a single response at 1000 rows regardless of how many match,
-  // so page through with .range() until a page comes back short of the page size.
+// Supabase/PostgREST caps a single response at 1000 rows regardless of how many match, so
+// big tables come back in pages. The first page also asks for the total row count; the rest
+// are then fetched all at once rather than one after another. `buildQuery` must return a
+// fresh query each call, with a stable order (ending in a unique column) so the pages don't
+// overlap or skip rows.
+async function fetchAllPages(buildQuery) {
   const pageSize = 1000;
-  let all = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await supabaseClient
-      .from("players")
-      .select("*")
-      .order("name", { ascending: true })
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    all = all.concat(data || []);
-    if (!data || data.length < pageSize) break;
-    from += pageSize;
+  const first = await buildQuery({ count: "exact" }).range(0, pageSize - 1);
+  if (first.error) throw first.error;
+  const total = first.count ?? (first.data || []).length;
+  const rest = [];
+  for (let from = pageSize; from < total; from += pageSize) {
+    rest.push(buildQuery().range(from, from + pageSize - 1));
   }
-  return all;
+  const pages = await Promise.all(rest);
+  for (const page of pages) if (page.error) throw page.error;
+  return [first, ...pages].flatMap((page) => page.data || []);
+}
+
+async function fetchAllPlayers() {
+  return fetchAllPages((opts) =>
+    supabaseClient
+      .from("players")
+      .select("*", opts)
+      .order("name", { ascending: true })
+      .order("player_id", { ascending: true })
+  );
 }
 
 async function fetchPlayer(playerId) {
@@ -39,20 +48,15 @@ async function fetchPlayer(playerId) {
 
 // Stat lines over a subset of games (e.g. split = "vs_hm"), keyed by player_id.
 async function fetchAllSplits(split) {
-  const pageSize = 1000;
-  const byPlayer = {};
-  let from = 0;
-  for (;;) {
-    const { data, error } = await supabaseClient
+  const rows = await fetchAllPages((opts) =>
+    supabaseClient
       .from("player_splits")
-      .select("*")
+      .select("*", opts)
       .eq("split", split)
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    for (const row of data || []) byPlayer[row.player_id] = row;
-    if (!data || data.length < pageSize) break;
-    from += pageSize;
-  }
+      .order("player_id", { ascending: true })
+  );
+  const byPlayer = {};
+  for (const row of rows) byPlayer[row.player_id] = row;
   return byPlayer;
 }
 
@@ -104,19 +108,9 @@ async function fetchCareerStats(playerId) {
 async function fetchReportCounts() {
   // Just the player_id column, paginated - lets index.html show a report count per player
   // without pulling every report's full content.
-  const pageSize = 1000;
-  let all = [];
-  let from = 0;
-  for (;;) {
-    const { data, error } = await supabaseClient
-      .from("reports")
-      .select("player_id")
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    all = all.concat(data || []);
-    if (!data || data.length < pageSize) break;
-    from += pageSize;
-  }
+  const all = await fetchAllPages((opts) =>
+    supabaseClient.from("reports").select("player_id", opts).order("id", { ascending: true })
+  );
   const counts = {};
   for (const r of all) {
     counts[r.player_id] = (counts[r.player_id] || 0) + 1;
