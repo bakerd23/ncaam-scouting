@@ -109,16 +109,20 @@
       const positions = [...new Set(allPlayers.map((p) => p.position).filter(Boolean))].sort();
       const classes = [...new Set(allPlayers.map((p) => p.class).filter(Boolean))].sort();
 
-      const fill = (id, values) => {
+      const fill = (id, values, label = (v) => v) => {
         const el = document.getElementById(id);
         for (const v of values) {
           const opt = document.createElement("option");
           opt.value = v;
-          opt.textContent = v;
+          opt.textContent = label(v);
           el.appendChild(opt);
         }
       };
-      fill("filter-conference", conferences);
+      fill(
+        "filter-conference",
+        conferences.sort((a, b) => shortConference(a).localeCompare(shortConference(b))),
+        shortConference
+      );
       fill("filter-school", schools);
       fill("filter-position", positions);
       fill("filter-class", classes);
@@ -341,9 +345,9 @@
         .map(
           (p) => `
         <tr onclick="window.location.href='${playerLink(p.player_id, hmOnly)}'">
-          <td>${escapeHtml(p.name)}</td>
-          <td>${escapeHtml(p.school)}</td>
-          <td>${escapeHtml(p.conference)}</td>
+          <td class="name-cell" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
+          <td class="school-cell" title="${escapeHtml(p.school)}">${escapeHtml(p.school)}</td>
+          <td title="${escapeHtml(p.conference)}">${escapeHtml(shortConference(p.conference))}</td>
           <td>${escapeHtml(p.position)}</td>
           <td>${escapeHtml(p.class)}</td>
           <td>${fmtStat(p.ppg)}</td>

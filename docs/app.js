@@ -170,6 +170,50 @@ function fmtPct(v) {
   return `${n.toFixed(1)}%`;
 }
 
+// ESPN's full conference names are what's stored (the scraper matches on them); these are
+// display-only abbreviations so the player table fits on a laptop screen.
+const SHORT_CONFERENCE = {
+  "America East Conference": "America East",
+  "American Conference": "American",
+  "Atlantic 10 Conference": "A-10",
+  "Atlantic Coast Conference": "ACC",
+  "Atlantic Sun Conference": "ASUN",
+  "Big 12 Conference": "Big 12",
+  "Big East Conference": "Big East",
+  "Big Sky Conference": "Big Sky",
+  "Big South Conference": "Big South",
+  "Big Ten Conference": "Big Ten",
+  "Big West Conference": "Big West",
+  "Coastal Athletic Association": "CAA",
+  "Conference USA": "CUSA",
+  "Horizon League": "Horizon",
+  "Ivy League": "Ivy",
+  "Metro Conference": "MAAC",
+  "Mid-American Conference": "MAC",
+  "Mid-Eastern Athletic Conference": "MEAC",
+  "Missouri Valley Conference": "MVC",
+  "Mountain West Conference": "MWC",
+  "Northeast Conference": "NEC",
+  "Ohio Valley Conference": "OVC",
+  "Pac-12 Conference": "Pac-12",
+  "Patriot League": "Patriot",
+  "Southeastern Conference": "SEC",
+  "Southern Conference": "SoCon",
+  "Southland Conference": "Southland",
+  "Southwestern Athletic Conference": "SWAC",
+  "Summit League": "Summit",
+  "Sun Belt Conference": "Sun Belt",
+  "United Athletic Conference": "UAC",
+  "West Coast Conference": "WCC",
+};
+
+// Unknown names (ESPN adds or renames a conference) fall back to dropping a trailing
+// "Conference", so they're still short-ish rather than blank.
+function shortConference(name) {
+  if (!name) return "";
+  return SHORT_CONFERENCE[name] || name.replace(/\s+Conference$/, "");
+}
+
 function playerLink(playerId, hmOnly = false) {
   return `player.html?id=${encodeURIComponent(playerId)}${hmOnly ? "&hm=1" : ""}`;
 }

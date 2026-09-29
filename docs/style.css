@@ -198,6 +198,25 @@ tbody tr:hover {
   cursor: pointer;
 }
 
+/* Player list: tighter cells + a capped School column so all the stat columns fit on a
+   ~1200px-wide browser without scrolling sideways (full school name shows on hover). */
+#players-table thead th,
+#players-table tbody td {
+  padding-left: 6px;
+  padding-right: 6px;
+}
+#players-table td.name-cell,
+#players-table td.school-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#players-table td.name-cell {
+  max-width: 165px;
+}
+#players-table td.school-cell {
+  max-width: 150px;
+}
+
 .status-line {
   color: var(--text-dim);
   font-size: 13px;
