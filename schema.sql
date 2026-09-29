@@ -31,7 +31,7 @@ create table if not exists players (
 alter table players add column if not exists espn_player_id text;
 
 -- Advanced metrics (computed by the scraper from the box score cache below). The four rates
--- are percentages (e.g. 12.3 = 12.3%); ft_rate is FTA per 100 FGA.
+-- are percentages (e.g. 12.3 = 12.3%); ft_rate is the ratio FTA / FGA (e.g. 0.536).
 alter table players add column if not exists orb_pct numeric;
 alter table players add column if not exists drb_pct numeric;
 alter table players add column if not exists stl_pct numeric;

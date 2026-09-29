@@ -111,6 +111,14 @@ HIGH_MID_MAJOR_CONFERENCES = {
 }
 # Opponent possessions = FGA - ORB + TOV + 0.475*FTA (KenPom's college FTA coefficient).
 POSS_FTA_COEF = 0.475
+# Total minutes a player needs before his advanced rates are shown. The rates estimate how many
+# rebounds/possessions were available while he was on the floor by spreading the team's
+# totals evenly over the game - fine over hundreds of minutes, but 1 offensive board in a
+# 1-minute cameo comes out as ~100% ORB% (and a split can top 100%). Below the cutoff the
+# rates are left blank, like Sports-Reference/KenPom leave them off leaderboards. The split
+# gets a lower bar since it's a subset of the season's games.
+MIN_MINUTES_FOR_ADVANCED = 100
+MIN_MINUTES_FOR_ADVANCED_SPLIT = 50
 
 JSON_REQUEST_TIMEOUT = 20
 SLEEP_BETWEEN_PLAYERS = 0.1
@@ -581,7 +589,7 @@ def get_school_names(season):
     }
 
 
-def compute_player_stats(team_games, player_games, include_game=None):
+def compute_player_stats(team_games, player_games, include_game=None, min_minutes=0):
     """Season stat lines per espn_player_id, summed from cached box scores.
 
     `include_game(event_id, team_id, opp_team_id)` limits which games count - applied to the
@@ -594,7 +602,8 @@ def compute_player_stats(team_games, player_games, include_game=None):
       DRB% = 100 * DRB * (TmMin/5) / (MIN * (Tm DRB + Opp ORB))
       STL% = 100 * STL * (TmMin/5) / (MIN * Opp Poss)
       BLK% = 100 * BLK * (TmMin/5) / (MIN * Opp 2PA)
-      FT Rate = 100 * FTA / FGA
+      FT Rate = FTA / FGA   (a ratio, e.g. 0.536 - not x100, same as Sports-Reference)
+    The advanced rates are None for players under `min_minutes` total minutes.
     """
     by_event = defaultdict(list)
     for g in team_games:
@@ -659,6 +668,7 @@ def compute_player_stats(team_games, player_games, include_game=None):
         if not t:
             continue
         gp = p["gp"]
+        qualified = p["min"] >= min_minutes
         out[pid] = {
             "gp": gp,
             "min": per_game(p["min"], gp),
@@ -671,12 +681,15 @@ def compute_player_stats(team_games, player_games, include_game=None):
             "fg_pct": pct(p["fgm"], p["fga"]),
             "three_pct": pct(p["fg3m"], p["fg3a"]),
             "ft_pct": pct(p["ftm"], p["fta"]),
+        }
+        advanced = {
             "orb_pct": rate(p["orb"], t["minutes"], p["min"], t["orb"] + t["opp_drb"]),
             "drb_pct": rate(p["drb"], t["minutes"], p["min"], t["drb"] + t["opp_orb"]),
             "stl_pct": rate(p["stl"], t["minutes"], p["min"], t["opp_poss"]),
             "blk_pct": rate(p["blk"], t["minutes"], p["min"], t["opp_2pa"]),
-            "ft_rate": round(100 * p["fta"] / p["fga"], 1) if p["fga"] else None,
+            "ft_rate": round(p["fta"] / p["fga"], 3) if p["fga"] else None,
         }
+        out[pid].update(advanced if qualified else dict.fromkeys(advanced))
     return out
 
 
@@ -700,9 +713,14 @@ def get_advanced_stats(client, season):
     hm_team_ids = {tid for tid, conf in conferences.items() if conf in HIGH_MID_MAJOR_CONFERENCES}
     print(f"  {len(hm_team_ids)} high/mid-major teams in {season}.")
     return {
-        "all": compute_player_stats(team_games, player_games),
+        "all": compute_player_stats(
+            team_games, player_games, min_minutes=MIN_MINUTES_FOR_ADVANCED
+        ),
         "vs_hm": compute_player_stats(
-            team_games, player_games, lambda _e, _t, opp: opp in hm_team_ids
+            team_games,
+            player_games,
+            lambda _e, _t, opp: opp in hm_team_ids,
+            min_minutes=MIN_MINUTES_FOR_ADVANCED_SPLIT,
         ),
     }
 

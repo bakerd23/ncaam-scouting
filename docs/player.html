@@ -106,7 +106,7 @@
             <div class="stat-tile" title="% of available defensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.drb_pct)}</div><div class="label">DRB%</div></div>
             <div class="stat-tile" title="% of opponent possessions ending in a steal by the player while on the floor"><div class="value">${fmtPct(p.stl_pct)}</div><div class="label">STL%</div></div>
             <div class="stat-tile" title="% of opponent 2-point attempts blocked by the player while on the floor"><div class="value">${fmtPct(p.blk_pct)}</div><div class="label">BLK%</div></div>
-            <div class="stat-tile" title="Free throw attempts per 100 field goal attempts"><div class="value">${fmtStat(p.ft_rate)}</div><div class="label">FT Rate</div></div>
+            <div class="stat-tile" title="Free throw attempts per field goal attempt (FTA ÷ FGA)"><div class="value">${fmtStat(p.ft_rate, 3)}</div><div class="label">FT Rate</div></div>
           </div>`;
       document.getElementById("hm-toggle").setAttribute("aria-pressed", String(hmOnly));
     }

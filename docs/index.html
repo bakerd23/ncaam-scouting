@@ -55,7 +55,7 @@
             <th data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2025-26)">DRB%</th>
             <th data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2025-26)">STL%</th>
             <th data-sort="blk_pct" title="Block Rate: % of opponent 2-point attempts blocked by the player while on the floor (2025-26)">BLK%</th>
-            <th data-sort="ft_rate" title="Free Throw Rate: free throw attempts per 100 field goal attempts (2025-26)">FTr</th>
+            <th data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (2025-26)">FTr</th>
             <th data-sort="report_count">Reports</th>
           </tr>
         </thead>
@@ -115,7 +115,7 @@
       { value: "drb_pct", label: "DRB%", type: "number", group: "Advanced" },
       { value: "stl_pct", label: "STL%", type: "number", group: "Advanced" },
       { value: "blk_pct", label: "BLK%", type: "number", group: "Advanced" },
-      { value: "ft_rate", label: "FT Rate", type: "number", group: "Advanced" },
+      { value: "ft_rate", label: "FT Rate", type: "number", group: "Advanced", hint: "0.350" },
       { value: "report_count", label: "Reports", type: "number", group: "Reports" },
     ];
 
@@ -386,7 +386,7 @@
           <td>${fmtPct(p.drb_pct)}</td>
           <td>${fmtPct(p.stl_pct)}</td>
           <td>${fmtPct(p.blk_pct)}</td>
-          <td>${fmtStat(p.ft_rate)}</td>
+          <td>${fmtStat(p.ft_rate, 3)}</td>
           <td>${renderReportCountCell(p.report_count)}</td>
         </tr>`;
     }
