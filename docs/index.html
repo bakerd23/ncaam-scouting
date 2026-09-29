@@ -24,6 +24,8 @@
       <select id="filter-position"><option value="">All Positions</option></select>
       <select id="filter-class"><option value="">All Classes</option></select>
       <button class="btn secondary" id="add-filter-btn" type="button">+ Add Filter</button>
+      <button class="btn secondary" id="hm-toggle" type="button" aria-pressed="false"
+        title="Only count games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents">vs High/Mid Major Only</button>
     </div>
 
     <div id="active-filters" class="active-filters"></div>
@@ -65,6 +67,9 @@
   <script src="app.js"></script>
   <script>
     let allPlayers = [];
+    let basePlayers = []; // players as loaded, with full-season stats
+    let hmSplits = null; // player_id -> "vs_hm" split row, loaded on first toggle
+    let hmOnly = false;
     let sortKey = "name";
     let sortAsc = true;
     let dynamicFilters = [];
@@ -296,7 +301,8 @@
 
       renderRows(rows);
       document.getElementById("status-line").textContent =
-        `${rows.length} of ${allPlayers.length} players`;
+        `${rows.length} of ${allPlayers.length} players` +
+        (hmOnly ? " · stats from games vs High/Mid Major opponents only" : "");
     }
 
     function renderReportCountCell(count) {
@@ -311,7 +317,7 @@
       tbody.innerHTML = rows
         .map(
           (p) => `
-        <tr onclick="window.location.href='${playerLink(p.player_id)}'">
+        <tr onclick="window.location.href='${playerLink(p.player_id, hmOnly)}'">
           <td>${escapeHtml(p.name)}</td>
           <td>${escapeHtml(p.school)}</td>
           <td>${escapeHtml(p.conference)}</td>
@@ -359,6 +365,29 @@
       });
     });
 
+    document.getElementById("hm-toggle").addEventListener("click", async (e) => {
+      const btn = e.currentTarget;
+      if (!hmSplits) {
+        btn.disabled = true;
+        try {
+          hmSplits = await fetchAllSplits("vs_hm");
+        } catch (err) {
+          document.getElementById("status-line").textContent =
+            "Failed to load High/Mid Major stats: " + err.message;
+          console.error(err);
+          return;
+        } finally {
+          btn.disabled = false;
+        }
+      }
+      hmOnly = !hmOnly;
+      btn.setAttribute("aria-pressed", String(hmOnly));
+      allPlayers = hmOnly
+        ? basePlayers.map((p) => withSplitStats(p, hmSplits[p.player_id]))
+        : basePlayers;
+      applyFiltersAndSort();
+    });
+
     ["search", "filter-conference", "filter-school", "filter-position", "filter-class"].forEach(
       (id) => {
         document.getElementById(id).addEventListener("input", applyFiltersAndSort);
@@ -374,10 +403,11 @@
           fetchAllPlayers(),
           canViewReports ? fetchReportCounts() : Promise.resolve({}),
         ]);
-        allPlayers = players.map((p) => ({
+        basePlayers = players.map((p) => ({
           ...p,
           report_count: reportCounts[p.player_id] || 0,
         }));
+        allPlayers = basePlayers;
         populateFilterOptions();
         updateSortHeaders();
         applyFiltersAndSort();

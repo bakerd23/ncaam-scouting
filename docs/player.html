@@ -73,7 +73,63 @@
         </div>`;
     }
 
+    let currentPlayer = null;
+    let hmSplit; // undefined = not loaded yet, null = no games vs High/Mid Majors
+    let hmOnly = qs("hm") === "1";
+
+    function renderStats() {
+      const p = hmOnly ? withSplitStats(currentPlayer, hmSplit) : currentPlayer;
+      const note =
+        hmOnly && !hmSplit
+          ? '<p class="player-meta">No games vs High/Mid Major opponents on record.</p>'
+          : hmOnly
+          ? '<p class="player-meta">Games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents only (2025-26).</p>'
+          : "";
+      document.getElementById("stats-section").innerHTML = `
+          ${note}
+          <div class="stat-grid">
+            <div class="stat-tile"><div class="value">${fmtStat(p.gp, 0)}</div><div class="label">GP</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.min)}</div><div class="label">MIN</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.ppg)}</div><div class="label">PPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.rpg)}</div><div class="label">RPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.apg)}</div><div class="label">APG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.spg)}</div><div class="label">SPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.bpg)}</div><div class="label">BPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.topg)}</div><div class="label">TOPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.fg_pct)}</div><div class="label">FG%</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.three_pct)}</div><div class="label">3P%</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.ft_pct)}</div><div class="label">FT%</div></div>
+          </div>
+          <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(2025-26)</span></h3>
+          <div class="stat-grid">
+            <div class="stat-tile" title="% of available offensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.orb_pct)}</div><div class="label">ORB%</div></div>
+            <div class="stat-tile" title="% of available defensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.drb_pct)}</div><div class="label">DRB%</div></div>
+            <div class="stat-tile" title="% of opponent possessions ending in a steal by the player while on the floor"><div class="value">${fmtPct(p.stl_pct)}</div><div class="label">STL%</div></div>
+            <div class="stat-tile" title="% of opponent 2-point attempts blocked by the player while on the floor"><div class="value">${fmtPct(p.blk_pct)}</div><div class="label">BLK%</div></div>
+            <div class="stat-tile" title="Free throw attempts per 100 field goal attempts"><div class="value">${fmtStat(p.ft_rate)}</div><div class="label">FT Rate</div></div>
+          </div>`;
+      document.getElementById("hm-toggle").setAttribute("aria-pressed", String(hmOnly));
+    }
+
+    async function toggleHm(e) {
+      const btn = e.currentTarget;
+      if (hmSplit === undefined) {
+        btn.disabled = true;
+        try {
+          hmSplit = await fetchSplit(currentPlayer.player_id, "vs_hm");
+        } catch (err) {
+          console.error(err);
+          return;
+        } finally {
+          btn.disabled = false;
+        }
+      }
+      hmOnly = !hmOnly;
+      renderStats();
+    }
+
     function renderPlayer(p, reports, loggedIn, career) {
+      currentPlayer = p;
       const content = document.getElementById("content");
       const reportsSection = loggedIn
         ? `
@@ -103,27 +159,10 @@
           <div class="player-meta" style="margin-top:6px;">
             ${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; Record: ${escapeHtml(p.record || "—")}
           </div>
-          <div class="stat-grid">
-            <div class="stat-tile"><div class="value">${fmtStat(p.gp, 0)}</div><div class="label">GP</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.min)}</div><div class="label">MIN</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.ppg)}</div><div class="label">PPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.rpg)}</div><div class="label">RPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.apg)}</div><div class="label">APG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.spg)}</div><div class="label">SPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.bpg)}</div><div class="label">BPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.topg)}</div><div class="label">TOPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtPct(p.fg_pct)}</div><div class="label">FG%</div></div>
-            <div class="stat-tile"><div class="value">${fmtPct(p.three_pct)}</div><div class="label">3P%</div></div>
-            <div class="stat-tile"><div class="value">${fmtPct(p.ft_pct)}</div><div class="label">FT%</div></div>
+          <div style="margin-top:14px;">
+            <button class="btn secondary" id="hm-toggle" type="button" aria-pressed="false">vs High/Mid Major Only</button>
           </div>
-          <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(2025-26)</span></h3>
-          <div class="stat-grid">
-            <div class="stat-tile" title="% of available offensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.orb_pct)}</div><div class="label">ORB%</div></div>
-            <div class="stat-tile" title="% of available defensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.drb_pct)}</div><div class="label">DRB%</div></div>
-            <div class="stat-tile" title="% of opponent possessions ending in a steal by the player while on the floor"><div class="value">${fmtPct(p.stl_pct)}</div><div class="label">STL%</div></div>
-            <div class="stat-tile" title="% of opponent 2-point attempts blocked by the player while on the floor"><div class="value">${fmtPct(p.blk_pct)}</div><div class="label">BLK%</div></div>
-            <div class="stat-tile" title="Free throw attempts per 100 field goal attempts"><div class="value">${fmtStat(p.ft_rate)}</div><div class="label">FT Rate</div></div>
-          </div>
+          <div id="stats-section"></div>
           <p class="player-meta" style="margin-top:14px;">Stats last updated: ${p.last_updated ? new Date(p.last_updated).toLocaleString() : "—"}</p>
           <a class="btn" href="report.html?id=${encodeURIComponent(p.player_id)}">Add a Scouting Report</a>
         </div>
@@ -135,6 +174,8 @@
 
         ${reportsSection}
       `;
+      document.getElementById("hm-toggle").addEventListener("click", toggleHm);
+      renderStats();
     }
 
     function renderReportCard(r) {
@@ -178,6 +219,7 @@
           content.innerHTML = '<p class="status-line">Player not found.</p>';
           return;
         }
+        if (hmOnly) hmSplit = await fetchSplit(player.player_id, "vs_hm");
         renderPlayer(player, reports, canViewReports, career);
       } catch (e) {
         content.innerHTML = `<p class="status-line">Failed to load player: ${escapeHtml(e.message)}</p>`;

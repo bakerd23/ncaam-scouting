@@ -70,6 +70,44 @@ create table if not exists game_player_stats (
   primary key (event_id, espn_player_id)
 );
 
+-- Full box score lines (for the "vs High/Mid Major" split). parse_version lets the scraper
+-- re-fetch games cached before a field was added.
+alter table game_team_stats add column if not exists parse_version integer;
+alter table game_player_stats add column if not exists pts numeric;
+alter table game_player_stats add column if not exists reb numeric;
+alter table game_player_stats add column if not exists ast numeric;
+alter table game_player_stats add column if not exists tov numeric;
+alter table game_player_stats add column if not exists fgm numeric;
+alter table game_player_stats add column if not exists fg3m numeric;
+alter table game_player_stats add column if not exists fg3a numeric;
+alter table game_player_stats add column if not exists ftm numeric;
+
+-- Per-player stat lines over a subset of games, computed by the scraper from the box score
+-- cache. split = 'vs_hm': games vs ACC/Big Ten/Big East/Big 12/SEC/Pac-12/Mountain West/
+-- A-10/American/MVC opponents (by conference membership the season the game was played).
+create table if not exists player_splits (
+  player_id text references players(player_id) on delete cascade,
+  split text not null,
+  gp numeric,
+  "min" numeric,
+  ppg numeric,
+  rpg numeric,
+  apg numeric,
+  spg numeric,
+  bpg numeric,
+  topg numeric,
+  fg_pct numeric,
+  three_pct numeric,
+  ft_pct numeric,
+  orb_pct numeric,
+  drb_pct numeric,
+  stl_pct numeric,
+  blk_pct numeric,
+  ft_rate numeric,
+  last_updated timestamptz default now(),
+  primary key (player_id, split)
+);
+
 create table if not exists reports (
   id uuid primary key default gen_random_uuid(),
   player_id text references players(player_id) on delete cascade,
@@ -124,6 +162,11 @@ alter table career_stats enable row level security;
 -- scraper's service_role key (which bypasses RLS) touches them.
 alter table game_team_stats enable row level security;
 alter table game_player_stats enable row level security;
+alter table player_splits enable row level security;
+
+drop policy if exists "player_splits readable by anyone" on player_splits;
+create policy "player_splits readable by anyone" on player_splits
+  for select using (true);
 
 drop policy if exists "players readable by anyone" on players;
 create policy "players readable by anyone" on players

@@ -258,6 +258,11 @@ tbody tr:hover {
   color: var(--text);
   border: 1px solid var(--border);
 }
+.btn.secondary[aria-pressed="true"] {
+  background: var(--accent);
+  color: #101820;
+  border-color: var(--accent);
+}
 
 .report-card {
   background: var(--panel-2);

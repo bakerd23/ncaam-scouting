@@ -37,6 +37,50 @@ async function fetchPlayer(playerId) {
   return data;
 }
 
+// Stat lines over a subset of games (e.g. split = "vs_hm"), keyed by player_id.
+async function fetchAllSplits(split) {
+  const pageSize = 1000;
+  const byPlayer = {};
+  let from = 0;
+  for (;;) {
+    const { data, error } = await supabaseClient
+      .from("player_splits")
+      .select("*")
+      .eq("split", split)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    for (const row of data || []) byPlayer[row.player_id] = row;
+    if (!data || data.length < pageSize) break;
+    from += pageSize;
+  }
+  return byPlayer;
+}
+
+async function fetchSplit(playerId, split) {
+  const { data, error } = await supabaseClient
+    .from("player_splits")
+    .select("*")
+    .eq("player_id", playerId)
+    .eq("split", split)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+// Every stat column a player_splits row can stand in for on the players row.
+const SPLIT_STAT_KEYS = [
+  "gp", "min", "ppg", "rpg", "apg", "spg", "bpg", "topg", "fg_pct", "three_pct", "ft_pct",
+  "orb_pct", "drb_pct", "stl_pct", "blk_pct", "ft_rate",
+];
+
+// A copy of player `p` with its stat columns swapped for `split`'s (null where the player
+// has no games in that split), leaving name/school/etc. untouched.
+function withSplitStats(p, split) {
+  const out = { ...p };
+  for (const k of SPLIT_STAT_KEYS) out[k] = split ? split[k] : null;
+  return out;
+}
+
 async function fetchReports(playerId) {
   const { data, error } = await supabaseClient
     .from("reports")
@@ -126,8 +170,8 @@ function fmtPct(v) {
   return `${n.toFixed(1)}%`;
 }
 
-function playerLink(playerId) {
-  return `player.html?id=${encodeURIComponent(playerId)}`;
+function playerLink(playerId, hmOnly = false) {
+  return `player.html?id=${encodeURIComponent(playerId)}${hmOnly ? "&hm=1" : ""}`;
 }
 
 function qs(name) {

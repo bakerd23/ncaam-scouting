@@ -84,7 +84,30 @@ SUMMARY_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball"
     "/summary?event={event_id}"
 )
+STANDINGS_API_URL = (
+    "https://site.api.espn.com/apis/v2/sports/basketball/mens-college-basketball"
+    "/standings?season={season}"
+)
 BOX_SCORE_WORKERS = 8
+# Bump whenever parse_box_score starts storing new fields: games cached under an older
+# version get re-fetched on the next run so every cached game has the full set.
+BOX_SCORE_VERSION = 2
+
+# "vs High/Mid Major Only": games against teams in these conferences, by ESPN's name for the
+# conference and by membership *in the season the game was played* (so e.g. Gonzaga counts
+# in 2026-27 via the Pac-12, but not in 2025-26 when it was in the WCC).
+HIGH_MID_MAJOR_CONFERENCES = {
+    "Atlantic Coast Conference",
+    "Big Ten Conference",
+    "Big East Conference",
+    "Big 12 Conference",
+    "Southeastern Conference",
+    "Pac-12 Conference",
+    "Mountain West Conference",
+    "Atlantic 10 Conference",
+    "American Conference",
+    "Missouri Valley Conference",
+}
 # Opponent possessions = FGA - ORB + TOV + 0.475*FTA (KenPom's college FTA coefficient).
 POSS_FTA_COEF = 0.475
 
@@ -400,6 +423,7 @@ def parse_box_score(event_id, season, summary):
                 "orb": _num(stats.get("offensiveRebounds")),
                 "drb": _num(stats.get("defensiveRebounds")),
                 "tov": _num(stats.get("totalTurnovers", stats.get("turnovers"))),
+                "parse_version": BOX_SCORE_VERSION,
             }
         )
     if any(r["fga"] is None or r["orb"] is None for r in team_rows):
@@ -419,8 +443,9 @@ def parse_box_score(event_id, season, summary):
                 minutes = _num(line.get("MIN"))
                 if not minutes:
                     continue
-                _, fga = _made_attempted(line.get("FG"))
-                _, fta = _made_attempted(line.get("FT"))
+                fgm, fga = _made_attempted(line.get("FG"))
+                fg3m, fg3a = _made_attempted(line.get("3PT"))
+                ftm, fta = _made_attempted(line.get("FT"))
                 player_rows.append(
                     {
                         "event_id": event_id,
@@ -428,30 +453,35 @@ def parse_box_score(event_id, season, summary):
                         "team_id": team_id,
                         "season": season,
                         "min": minutes,
+                        "pts": _num(line.get("PTS")),
+                        "reb": _num(line.get("REB")),
+                        "ast": _num(line.get("AST")),
+                        "tov": _num(line.get("TO")),
                         "orb": _num(line.get("OREB")),
                         "drb": _num(line.get("DREB")),
                         "stl": _num(line.get("STL")),
                         "blk": _num(line.get("BLK")),
+                        "fgm": fgm,
                         "fga": fga,
+                        "fg3m": fg3m,
+                        "fg3a": fg3a,
+                        "ftm": ftm,
                         "fta": fta,
                     }
                 )
     return team_rows, player_rows
 
 
-def select_all(client, table, columns, season):
-    """Every row of `table` for `season`, paging past PostgREST's 1000-row response cap."""
+def select_all(client, table, columns, season, **eq):
+    """Every row of `table` for `season` (plus any extra column=value filters), paging past
+    PostgREST's 1000-row response cap."""
     page_size = 1000
     rows, start = [], 0
     while True:
-        data = (
-            client.table(table)
-            .select(columns)
-            .eq("season", season)
-            .range(start, start + page_size - 1)
-            .execute()
-            .data
-        )
+        query = client.table(table).select(columns).eq("season", season)
+        for col, val in eq.items():
+            query = query.eq(col, val)
+        data = query.range(start, start + page_size - 1).execute().data
         rows.extend(data)
         if len(data) < page_size:
             return rows
@@ -468,7 +498,12 @@ def _fetch_box_score(event_id, season):
 
 def update_box_score_cache(client, season):
     """Fetches and stores box scores for every completed game not already cached."""
-    cached = {r["event_id"] for r in select_all(client, "game_team_stats", "event_id", season)}
+    cached = {
+        r["event_id"]
+        for r in select_all(
+            client, "game_team_stats", "event_id", season, parse_version=BOX_SCORE_VERSION
+        )
+    }
     new_ids = sorted(list_completed_games(season) - cached)
     print(f"  {len(cached) // 2} games cached, {len(new_ids)} new to fetch.")
 
@@ -492,11 +527,31 @@ def update_box_score_cache(client, season):
         print(f"    fetched {min(i + chunk_size, len(new_ids))}/{len(new_ids)}")
 
 
-def compute_advanced_stats(team_games, player_games):
-    """Season ORB%, DRB%, STL%, BLK% and FT Rate per espn_player_id, from cached box scores.
+PLAYER_BOX_KEYS = (
+    "min", "pts", "reb", "ast", "tov", "orb", "drb", "stl", "blk",
+    "fgm", "fga", "fg3m", "fg3a", "ftm", "fta",
+)
 
-    Standard Sports-Reference/KenPom definitions, where team minutes / 5 is just the sum of
-    game lengths (so overtime counts):
+
+def get_conferences(season):
+    """{espn_team_id: conference name} for every D1 team in `season`."""
+    data = curl_get_json(STANDINGS_API_URL.format(season=season))
+    return {
+        str(e["team"]["id"]): conf.get("name")
+        for conf in data.get("children", [])
+        for e in conf.get("standings", {}).get("entries", [])
+    }
+
+
+def compute_player_stats(team_games, player_games, include_game=None):
+    """Season stat lines per espn_player_id, summed from cached box scores.
+
+    `include_game(event_id, team_id, opp_team_id)` limits which games count - applied to the
+    team/opponent totals and the player's own games alike, so a split's rate stats are
+    measured against only that split's possessions and rebound chances.
+
+    Per-game stats plus the advanced rates, using the standard Sports-Reference/KenPom
+    definitions, where team minutes / 5 is just the sum of game lengths (so OT counts):
       ORB% = 100 * ORB * (TmMin/5) / (MIN * (Tm ORB + Opp DRB))
       DRB% = 100 * DRB * (TmMin/5) / (MIN * (Tm DRB + Opp ORB))
       STL% = 100 * STL * (TmMin/5) / (MIN * Opp Poss)
@@ -507,11 +562,15 @@ def compute_advanced_stats(team_games, player_games):
     for g in team_games:
         by_event[g["event_id"]].append(g)
 
+    opp_of = {}
     team = defaultdict(lambda: defaultdict(float))
-    for games in by_event.values():
+    for event_id, games in by_event.items():
         if len(games) != 2:
             continue
         for own, opp in ((games[0], games[1]), (games[1], games[0])):
+            opp_of[(event_id, own["team_id"])] = opp["team_id"]
+            if include_game and not include_game(event_id, own["team_id"], opp["team_id"]):
+                continue
             t = team[own["team_id"]]
             t["minutes"] += own["game_minutes"]
             t["orb"] += own["orb"] or 0
@@ -528,14 +587,26 @@ def compute_advanced_stats(team_games, player_games):
 
     player = defaultdict(lambda: defaultdict(float))
     for g in player_games:
+        opp_team_id = opp_of.get((g["event_id"], g["team_id"]))
+        if opp_team_id is None:
+            continue
+        if include_game and not include_game(g["event_id"], g["team_id"], opp_team_id):
+            continue
         p = player[(g["espn_player_id"], g["team_id"])]
-        for k in ("min", "orb", "drb", "stl", "blk", "fga", "fta"):
+        p["gp"] += 1
+        for k in PLAYER_BOX_KEYS:
             p[k] += g[k] or 0
 
     def rate(stat, tm_min, p_min, denom):
         if not p_min or not denom:
             return None
         return round(100 * stat * tm_min / (p_min * denom), 1)
+
+    def per_game(total, gp):
+        return round(total / gp, 1) if gp else None
+
+    def pct(made, att):
+        return round(100 * made / att, 1) if att else None
 
     # A player who switched teams mid-season gets measured against the team he played the
     # most minutes for - the players table only holds one school per player anyway.
@@ -549,7 +620,19 @@ def compute_advanced_stats(team_games, player_games):
         t = team.get(team_id)
         if not t:
             continue
+        gp = p["gp"]
         out[pid] = {
+            "gp": gp,
+            "min": per_game(p["min"], gp),
+            "ppg": per_game(p["pts"], gp),
+            "rpg": per_game(p["reb"], gp),
+            "apg": per_game(p["ast"], gp),
+            "spg": per_game(p["stl"], gp),
+            "bpg": per_game(p["blk"], gp),
+            "topg": per_game(p["tov"], gp),
+            "fg_pct": pct(p["fgm"], p["fga"]),
+            "three_pct": pct(p["fg3m"], p["fg3a"]),
+            "ft_pct": pct(p["ftm"], p["fta"]),
             "orb_pct": rate(p["orb"], t["minutes"], p["min"], t["orb"] + t["opp_drb"]),
             "drb_pct": rate(p["drb"], t["minutes"], p["min"], t["drb"] + t["opp_orb"]),
             "stl_pct": rate(p["stl"], t["minutes"], p["min"], t["opp_poss"]),
@@ -560,7 +643,8 @@ def compute_advanced_stats(team_games, player_games):
 
 
 def get_advanced_stats(client, season):
-    """Refreshes the box score cache, then returns {espn_player_id: {orb_pct, ...}}."""
+    """Refreshes the box score cache, then returns
+    {"all": {espn_player_id: stats}, "vs_hm": {espn_player_id: stats}}."""
     update_box_score_cache(client, season)
     team_games = select_all(
         client,
@@ -571,10 +655,18 @@ def get_advanced_stats(client, season):
     player_games = select_all(
         client,
         "game_player_stats",
-        "espn_player_id,team_id,min,orb,drb,stl,blk,fga,fta",
+        "event_id,espn_player_id,team_id," + ",".join(PLAYER_BOX_KEYS),
         season,
     )
-    return compute_advanced_stats(team_games, player_games)
+    conferences = get_conferences(season)
+    hm_team_ids = {tid for tid, conf in conferences.items() if conf in HIGH_MID_MAJOR_CONFERENCES}
+    print(f"  {len(hm_team_ids)} high/mid-major teams in {season}.")
+    return {
+        "all": compute_player_stats(team_games, player_games),
+        "vs_hm": compute_player_stats(
+            team_games, player_games, lambda _e, _t, opp: opp in hm_team_ids
+        ),
+    }
 
 
 ADVANCED_STAT_KEYS = ("orb_pct", "drb_pct", "stl_pct", "blk_pct", "ft_rate")
@@ -593,7 +685,7 @@ def scrape_team(page, team, advanced=None):
     all_names = set(roster.keys()) | set(stats.keys())
     now = datetime.now(timezone.utc).isoformat()
 
-    rows = []
+    rows, split_rows = [], []
     for name in all_names:
         r_info = roster.get(name, {})
         s_info = stats.get(name, {})
@@ -626,10 +718,15 @@ def scrape_team(page, team, advanced=None):
         # `advanced` is None when the box-score step failed this run - leave the keys off
         # entirely so the upsert keeps yesterday's values instead of nulling them out.
         if advanced is not None:
-            adv = advanced.get(espn_player_id, {})
+            adv = advanced["all"].get(espn_player_id, {})
             row.update({k: adv.get(k) for k in ADVANCED_STAT_KEYS})
+            hm = advanced["vs_hm"].get(espn_player_id)
+            if hm:
+                split_rows.append(
+                    {"player_id": player_id, "split": "vs_hm", **hm, "last_updated": now}
+                )
         rows.append(row)
-    return rows
+    return rows, split_rows
 
 
 def upsert_players(client, rows):
@@ -640,6 +737,16 @@ def upsert_players(client, rows):
     for i in range(0, len(rows), chunk_size):
         chunk = rows[i : i + chunk_size]
         client.table("players").upsert(chunk, on_conflict="player_id").execute()
+
+
+def replace_player_splits(client, player_ids, split_rows):
+    """Replaces this team's split rows wholesale - delete first, so a player who no longer has
+    any qualifying games doesn't keep a stale line from an earlier run."""
+    if not player_ids:
+        return
+    client.table("player_splits").delete().in_("player_id", player_ids).execute()
+    if split_rows:
+        client.table("player_splits").upsert(split_rows, on_conflict="player_id,split").execute()
 
 
 def upsert_career_stats(client, rows):
@@ -677,7 +784,10 @@ def main():
     print(f"Updating box score cache + advanced metrics for season {ADVANCED_SEASON}...")
     try:
         advanced = get_advanced_stats(client, ADVANCED_SEASON)
-        print(f"Computed advanced metrics for {len(advanced)} players.")
+        print(
+            f"Computed advanced metrics for {len(advanced['all'])} players "
+            f"({len(advanced['vs_hm'])} with games vs high/mid majors)."
+        )
     except Exception as e:
         advanced = None
         print(f"Advanced metrics failed, keeping existing values this run: {e}")
@@ -713,8 +823,10 @@ def main():
         total_players = 0
         for i, team in enumerate(teams, start=1):
             print(f"[{i}/{len(teams)}] {team['name']} ({team['conference']})")
-            rows = scrape_team(page, team, advanced)
+            rows, split_rows = scrape_team(page, team, advanced)
             upsert_players(client, rows)
+            if advanced is not None:
+                replace_player_splits(client, [r["player_id"] for r in rows], split_rows)
             total_players += len(rows)
             if include_career_stats:
                 scrape_and_upsert_career_stats(client, rows)
