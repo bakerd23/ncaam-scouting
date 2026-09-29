@@ -119,6 +119,10 @@ POSS_FTA_COEF = 0.475
 # gets a lower bar since it's a subset of the season's games.
 MIN_MINUTES_FOR_ADVANCED = 100
 MIN_MINUTES_FOR_ADVANCED_SPLIT = 50
+# FT Rate depends on shot attempts, not minutes: a big who plays 100+ minutes but only takes
+# 5 shots can post a 2.200. So it also needs a minimum number of field goal attempts.
+MIN_FGA_FOR_FT_RATE = 20
+MIN_FGA_FOR_FT_RATE_SPLIT = 10
 
 JSON_REQUEST_TIMEOUT = 20
 SLEEP_BETWEEN_PLAYERS = 0.1
@@ -589,7 +593,9 @@ def get_school_names(season):
     }
 
 
-def compute_player_stats(team_games, player_games, include_game=None, min_minutes=0):
+def compute_player_stats(
+    team_games, player_games, include_game=None, min_minutes=0, min_fga_for_ft_rate=0
+):
     """Season stat lines per espn_player_id, summed from cached box scores.
 
     `include_game(event_id, team_id, opp_team_id)` limits which games count - applied to the
@@ -603,7 +609,8 @@ def compute_player_stats(team_games, player_games, include_game=None, min_minute
       STL% = 100 * STL * (TmMin/5) / (MIN * Opp Poss)
       BLK% = 100 * BLK * (TmMin/5) / (MIN * Opp 2PA)
       FT Rate = FTA / FGA   (a ratio, e.g. 0.536 - not x100, same as Sports-Reference)
-    The advanced rates are None for players under `min_minutes` total minutes.
+    The advanced rates are None for players under `min_minutes` total minutes, and FT Rate
+    is also None under `min_fga_for_ft_rate` field goal attempts.
     """
     by_event = defaultdict(list)
     for g in team_games:
@@ -687,7 +694,11 @@ def compute_player_stats(team_games, player_games, include_game=None, min_minute
             "drb_pct": rate(p["drb"], t["minutes"], p["min"], t["drb"] + t["opp_orb"]),
             "stl_pct": rate(p["stl"], t["minutes"], p["min"], t["opp_poss"]),
             "blk_pct": rate(p["blk"], t["minutes"], p["min"], t["opp_2pa"]),
-            "ft_rate": round(p["fta"] / p["fga"], 3) if p["fga"] else None,
+            "ft_rate": (
+                round(p["fta"] / p["fga"], 3)
+                if p["fga"] and p["fga"] >= min_fga_for_ft_rate
+                else None
+            ),
         }
         out[pid].update(advanced if qualified else dict.fromkeys(advanced))
     return out
@@ -714,13 +725,17 @@ def get_advanced_stats(client, season):
     print(f"  {len(hm_team_ids)} high/mid-major teams in {season}.")
     return {
         "all": compute_player_stats(
-            team_games, player_games, min_minutes=MIN_MINUTES_FOR_ADVANCED
+            team_games,
+            player_games,
+            min_minutes=MIN_MINUTES_FOR_ADVANCED,
+            min_fga_for_ft_rate=MIN_FGA_FOR_FT_RATE,
         ),
         "vs_hm": compute_player_stats(
             team_games,
             player_games,
             lambda _e, _t, opp: opp in hm_team_ids,
             min_minutes=MIN_MINUTES_FOR_ADVANCED_SPLIT,
+            min_fga_for_ft_rate=MIN_FGA_FOR_FT_RATE_SPLIT,
         ),
     }
 
