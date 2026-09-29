@@ -189,6 +189,13 @@
             <span><strong>${escapeHtml(r.scout_name)}</strong> &middot; ${escapeHtml(r.date_watched)}${r.context ? " &middot; " + escapeHtml(r.context) : ""}</span>
             ${r.overall_grade !== null && r.overall_grade !== undefined ? `<span class="grade-pill">${escapeHtml(r.overall_grade)}/10</span>` : ""}
           </div>
+          ${field("Parents", r.parents)}
+          ${field("AAU Coach", r.aau_coach)}
+          ${field("Agent", r.agent)}
+          ${field("Finances", r.finances)}
+          ${field("Why he would be successful", r.success_reasons)}
+          ${field("Why he wouldn't be successful", r.failure_reasons)}
+          ${field("Notes from live game play", r.live_game_notes)}
           ${field("Projection", r.projection)}
           ${field("Strengths", r.strengths)}
           ${field("Weaknesses", r.weaknesses)}

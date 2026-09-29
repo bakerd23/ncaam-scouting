@@ -128,6 +128,18 @@ create table if not exists reports (
 alter table reports add column if not exists confidence_level numeric;
 alter table reports add column if not exists would_recommend text;
 
+-- Nelson's report questions (2026-09). These replaced the grade/projection/strengths/weaknesses/
+-- confidence/recommend/notes fields on the form; those columns stay so older reports still show.
+-- NOTE: parents/agent/finances are sensitive - reports are still publicly readable (DEMO MODE
+-- below) until the LOCKDOWN policy is applied.
+alter table reports add column if not exists parents text;
+alter table reports add column if not exists aau_coach text;
+alter table reports add column if not exists agent text;
+alter table reports add column if not exists finances text;
+alter table reports add column if not exists success_reasons text;
+alter table reports add column if not exists failure_reasons text;
+alter table reports add column if not exists live_game_notes text;
+
 create table if not exists career_stats (
   id uuid primary key default gen_random_uuid(),
   player_id text references players(player_id) on delete cascade,
