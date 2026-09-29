@@ -202,8 +202,8 @@ tbody tr:hover {
    without scrolling sideways. */
 #players-table thead th,
 #players-table tbody td {
-  padding-left: 6px;
-  padding-right: 6px;
+  padding-left: 5px;
+  padding-right: 5px;
 }
 
 .status-line {

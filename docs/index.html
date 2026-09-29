@@ -41,6 +41,7 @@
             <th data-sort="conference">Conference</th>
             <th data-sort="position">Pos</th>
             <th data-sort="class">Class</th>
+            <th data-sort="gp" title="Games played">GP</th>
             <th data-sort="min" title="Minutes per game">MPG</th>
             <th data-sort="ppg">PPG</th>
             <th data-sort="rpg">RPG</th>
@@ -371,6 +372,7 @@
           <td title="${escapeHtml(p.conference)}">${escapeHtml(shortConference(p.conference))}</td>
           <td>${escapeHtml(p.position)}</td>
           <td>${escapeHtml(p.class)}</td>
+          <td>${fmtStat(p.gp, 0)}</td>
           <td>${fmtStat(p.min)}</td>
           <td>${fmtStat(p.ppg)}</td>
           <td>${fmtStat(p.rpg)}</td>
