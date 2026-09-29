@@ -23,12 +23,12 @@
       <select id="filter-school"><option value="">All Schools</option></select>
       <select id="filter-position"><option value="">All Positions</option></select>
       <select id="filter-class"><option value="">All Classes</option></select>
-      <button class="btn secondary" id="add-filter-btn" type="button">+ Add Filter</button>
+      <button class="btn secondary" id="add-filter-btn" type="button" aria-expanded="false" aria-controls="filter-panel">Filters</button>
       <button class="btn secondary" id="hm-toggle" type="button" aria-pressed="false"
         title="Only count games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents">vs High/Mid Major Only</button>
     </div>
 
-    <div id="active-filters" class="active-filters"></div>
+    <div id="filter-panel" class="filter-panel" hidden></div>
 
     <div class="status-line" id="status-line">Loading players...</div>
 
@@ -73,35 +73,34 @@
     let sortKey = "name";
     let sortAsc = true;
     let dynamicFilters = [];
-    let filterIdCounter = 0;
     let canViewReports = true;
 
-    // Ported from the Moats/transfer-portal roster board's dynamic filter builder: pick a
-    // stat, a comparison, and a value, stack as many as you want. Height/weight/record need
-    // the same string-to-number parsing there since they're stored as raw ESPN text.
+    // Every filterable column, shown all at once in the Filters panel: give any of them a
+    // comparison and a value to filter on it. Height/weight/record need string-to-number
+    // parsing since they're stored as raw ESPN text.
     const STAT_OPTIONS = [
-      { value: "position", label: "Position", type: "string" },
-      { value: "class", label: "Class", type: "string" },
-      { value: "height", label: "Height", type: "height" },
-      { value: "weight", label: "Weight", type: "weight" },
-      { value: "record", label: "Win %", type: "record" },
-      { value: "gp", label: "Games Played", type: "number" },
-      { value: "min", label: "Minutes", type: "number" },
-      { value: "ppg", label: "Points", type: "number" },
-      { value: "rpg", label: "Rebounds", type: "number" },
-      { value: "apg", label: "Assists", type: "number" },
-      { value: "spg", label: "Steals", type: "number" },
-      { value: "bpg", label: "Blocks", type: "number" },
-      { value: "topg", label: "Turnovers", type: "number" },
-      { value: "fg_pct", label: "FG%", type: "number" },
-      { value: "three_pct", label: "3P%", type: "number" },
-      { value: "ft_pct", label: "FT%", type: "number" },
-      { value: "orb_pct", label: "ORB%", type: "number" },
-      { value: "drb_pct", label: "DRB%", type: "number" },
-      { value: "stl_pct", label: "STL%", type: "number" },
-      { value: "blk_pct", label: "BLK%", type: "number" },
-      { value: "ft_rate", label: "FT Rate", type: "number" },
-      { value: "report_count", label: "Reports", type: "number" },
+      { value: "position", label: "Position", type: "string", group: "Player", hint: "G" },
+      { value: "class", label: "Class", type: "string", group: "Player", hint: "SR" },
+      { value: "height", label: "Height", type: "height", group: "Player", hint: "6'5\"" },
+      { value: "weight", label: "Weight", type: "weight", group: "Player", hint: "200" },
+      { value: "record", label: "Team Win %", type: "record", group: "Player", hint: "0.600" },
+      { value: "gp", label: "Games Played", type: "number", group: "Per Game" },
+      { value: "min", label: "Minutes", type: "number", group: "Per Game" },
+      { value: "ppg", label: "Points", type: "number", group: "Per Game" },
+      { value: "rpg", label: "Rebounds", type: "number", group: "Per Game" },
+      { value: "apg", label: "Assists", type: "number", group: "Per Game" },
+      { value: "spg", label: "Steals", type: "number", group: "Per Game" },
+      { value: "bpg", label: "Blocks", type: "number", group: "Per Game" },
+      { value: "topg", label: "Turnovers", type: "number", group: "Per Game" },
+      { value: "fg_pct", label: "FG%", type: "number", group: "Shooting", hint: "45" },
+      { value: "three_pct", label: "3P%", type: "number", group: "Shooting", hint: "35" },
+      { value: "ft_pct", label: "FT%", type: "number", group: "Shooting", hint: "75" },
+      { value: "orb_pct", label: "ORB%", type: "number", group: "Advanced" },
+      { value: "drb_pct", label: "DRB%", type: "number", group: "Advanced" },
+      { value: "stl_pct", label: "STL%", type: "number", group: "Advanced" },
+      { value: "blk_pct", label: "BLK%", type: "number", group: "Advanced" },
+      { value: "ft_rate", label: "FT Rate", type: "number", group: "Advanced" },
+      { value: "report_count", label: "Reports", type: "number", group: "Reports" },
     ];
 
     function populateFilterOptions() {
@@ -125,68 +124,92 @@
       fill("filter-class", classes);
     }
 
-    function addFilterRow() {
-      const id = filterIdCounter++;
-      dynamicFilters.push({ id, stat: "ppg", comparison: ">=", value: "" });
+    function comparisonOptionsFor(type) {
+      if (type === "string") return [["=", "="], ["!=", "≠"]];
+      return [
+        [">=", "≥"],
+        ["<=", "≤"],
+        ["=", "="],
+        [">", ">"],
+        ["<", "<"],
+      ];
+    }
 
-      const row = document.createElement("div");
-      row.className = "filter-row";
-      row.id = `filter-${id}`;
-      row.innerHTML = `
-        <select data-role="stat">
-          ${STAT_OPTIONS.map((o) => `<option value="${o.value}">${o.label}</option>`).join("")}
-        </select>
-        <select data-role="comparison"></select>
-        <input type="text" data-role="value" placeholder="Value" />
-        <button type="button" data-role="remove">Remove</button>
-      `;
-      document.getElementById("active-filters").appendChild(row);
+    // One filter per column, all visible at once; a column only filters once its value box
+    // has something in it.
+    function buildFilterPanel() {
+      const panel = document.getElementById("filter-panel");
+      const groups = [...new Set(STAT_OPTIONS.map((o) => o.group))];
+      panel.innerHTML =
+        groups
+          .map(
+            (g) => `
+        <fieldset class="filter-group">
+          <legend>${g}</legend>
+          ${STAT_OPTIONS.filter((o) => o.group === g)
+            .map(
+              (o) => `
+          <div class="filter-line" data-stat="${o.value}">
+            <label for="flt-${o.value}">${o.label}</label>
+            <select data-role="comparison" aria-label="${o.label} comparison">
+              ${comparisonOptionsFor(o.type).map(([v, label]) => `<option value="${v}">${label}</option>`).join("")}
+            </select>
+            <input type="text" id="flt-${o.value}" data-role="value" placeholder="${escapeHtml(o.hint || "")}" />
+          </div>`
+            )
+            .join("")}
+        </fieldset>`
+          )
+          .join("") +
+        `<div class="filter-panel-actions"><button type="button" class="btn secondary" id="clear-filters-btn">Clear all</button></div>`;
 
-      const statSelect = row.querySelector('[data-role="stat"]');
-      const comparisonSelect = row.querySelector('[data-role="comparison"]');
-      const valueInput = row.querySelector('[data-role="value"]');
+      dynamicFilters = STAT_OPTIONS.map((o) => ({
+        stat: o.value,
+        comparison: comparisonOptionsFor(o.type)[0][0],
+        value: "",
+      }));
 
-      function comparisonOptionsFor(type) {
-        if (type === "string") return [["=", "="], ["!=", "≠"]];
-        return [
-          [">=", "≥"],
-          ["<=", "≤"],
-          ["=", "="],
-          [">", ">"],
-          ["<", "<"],
-        ];
-      }
-
-      function refreshComparisonOptions() {
-        const opt = STAT_OPTIONS.find((o) => o.value === statSelect.value);
-        const options = comparisonOptionsFor(opt ? opt.type : "number");
-        comparisonSelect.innerHTML = options
-          .map(([v, label]) => `<option value="${v}">${label}</option>`)
-          .join("");
-      }
-      refreshComparisonOptions();
-
-      const sync = () => {
-        const f = dynamicFilters.find((x) => x.id === id);
-        f.stat = statSelect.value;
-        f.comparison = comparisonSelect.value;
-        f.value = valueInput.value;
-        applyFiltersAndSort();
-      };
-      statSelect.addEventListener("change", () => {
-        refreshComparisonOptions();
-        sync();
+      panel.querySelectorAll(".filter-line").forEach((line) => {
+        const f = dynamicFilters.find((x) => x.stat === line.dataset.stat);
+        const comparison = line.querySelector('[data-role="comparison"]');
+        const value = line.querySelector('[data-role="value"]');
+        const sync = () => {
+          f.comparison = comparison.value;
+          f.value = value.value.trim();
+          line.classList.toggle("active", f.value !== "");
+          updateFilterButton();
+          applyFiltersAndSort();
+        };
+        comparison.addEventListener("change", sync);
+        value.addEventListener("input", sync);
       });
-      comparisonSelect.addEventListener("change", sync);
-      valueInput.addEventListener("input", sync);
-      row.querySelector('[data-role="remove"]').addEventListener("click", () => {
-        dynamicFilters = dynamicFilters.filter((x) => x.id !== id);
-        row.remove();
+
+      document.getElementById("clear-filters-btn").addEventListener("click", () => {
+        panel.querySelectorAll(".filter-line").forEach((line) => {
+          line.querySelector('[data-role="comparison"]').selectedIndex = 0;
+          line.querySelector('[data-role="value"]').value = "";
+          line.classList.remove("active");
+        });
+        for (const f of dynamicFilters) {
+          f.comparison = comparisonOptionsFor(STAT_OPTIONS.find((o) => o.value === f.stat).type)[0][0];
+          f.value = "";
+        }
+        updateFilterButton();
         applyFiltersAndSort();
       });
     }
 
-    document.getElementById("add-filter-btn").addEventListener("click", addFilterRow);
+    function updateFilterButton() {
+      const n = dynamicFilters.filter((f) => f.value !== "").length;
+      document.getElementById("add-filter-btn").textContent = n ? `Filters (${n})` : "Filters";
+    }
+
+    document.getElementById("add-filter-btn").addEventListener("click", (e) => {
+      const panel = document.getElementById("filter-panel");
+      panel.hidden = !panel.hidden;
+      e.currentTarget.setAttribute("aria-expanded", String(!panel.hidden));
+    });
+    buildFilterPanel();
 
     const NAME_SUFFIXES = new Set(["jr", "sr", "ii", "iii", "iv", "v"]);
     function lastNameOf(fullName) {
