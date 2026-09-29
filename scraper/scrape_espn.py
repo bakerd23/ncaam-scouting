@@ -358,7 +358,7 @@ def get_career_stats(espn_id):
 
         labels = avg_cat.get("labels", [])
         school_by_team_id = {
-            info.get("id"): info.get("displayName")
+            info.get("id"): info.get("location") or info.get("displayName")
             for info in data.get("teams", {}).values()
             if info.get("id")
         }
@@ -556,13 +556,28 @@ PLAYER_BOX_KEYS = (
 )
 
 
-def get_conferences(season):
-    """{espn_team_id: conference name} for every D1 team in `season`."""
+def _standings_entries(season):
+    """(conference name, ESPN team dict) for every D1 team in `season`."""
     data = curl_get_json(STANDINGS_API_URL.format(season=season))
-    return {
-        str(e["team"]["id"]): conf.get("name")
+    return [
+        (conf.get("name"), e["team"])
         for conf in data.get("children", [])
         for e in conf.get("standings", {}).get("entries", [])
+    ]
+
+
+def get_conferences(season):
+    """{espn_team_id: conference name} for every D1 team in `season`."""
+    return {str(team["id"]): conf for conf, team in _standings_entries(season)}
+
+
+def get_school_names(season):
+    """{espn_team_id: school name without the mascot} - ESPN's `location`, e.g. "Duke" for
+    "Duke Blue Devils", "Miami (OH)" for "Miami (OH) RedHawks". Unique across D1."""
+    return {
+        str(team["id"]): team["location"]
+        for _, team in _standings_entries(season)
+        if team.get("location")
     }
 
 
@@ -897,6 +912,10 @@ def scrape_and_upsert_career_stats(client, roster_rows):
                 {"player_id": row["player_id"], "espn_player_id": espn_id, **s}
                 for s in seasons
             ]
+            # Replace rather than just upsert: school is part of the row's key, so if the
+            # school's spelling ever changes (e.g. the switch to mascot-free names) an upsert
+            # alone would leave every past season listed twice.
+            execute(client.table("career_stats").delete().eq("player_id", row["player_id"]))
             upsert_career_stats(client, career_rows)
         time.sleep(SLEEP_BETWEEN_PLAYERS)
 
@@ -933,6 +952,13 @@ def main():
         print("Fetching D1 team list from ESPN standings...")
         teams = get_teams(page)
         print(f"Found {len(teams)} teams.")
+        try:
+            school_names = get_school_names(ADVANCED_SEASON)
+        except Exception as e:
+            school_names = {}
+            print(f"Couldn't fetch mascot-free school names, keeping ESPN's full names: {e}")
+        for team in teams:
+            team["name"] = school_names.get(team["team_id"], team["name"])
 
         team_limit = os.environ.get("TEAM_LIMIT", "").strip()
         if team_limit:

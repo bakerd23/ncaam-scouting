@@ -345,8 +345,8 @@
         .map(
           (p) => `
         <tr onclick="window.location.href='${playerLink(p.player_id, hmOnly)}'">
-          <td class="name-cell" title="${escapeHtml(p.name)}">${escapeHtml(p.name)}</td>
-          <td class="school-cell" title="${escapeHtml(p.school)}">${escapeHtml(p.school)}</td>
+          <td>${escapeHtml(p.name)}</td>
+          <td>${escapeHtml(p.school)}</td>
           <td title="${escapeHtml(p.conference)}">${escapeHtml(shortConference(p.conference))}</td>
           <td>${escapeHtml(p.position)}</td>
           <td>${escapeHtml(p.class)}</td>
