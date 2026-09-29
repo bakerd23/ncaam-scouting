@@ -116,6 +116,14 @@
             <div class="stat-tile"><div class="value">${fmtPct(p.three_pct)}</div><div class="label">3P%</div></div>
             <div class="stat-tile"><div class="value">${fmtPct(p.ft_pct)}</div><div class="label">FT%</div></div>
           </div>
+          <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(2025-26)</span></h3>
+          <div class="stat-grid">
+            <div class="stat-tile" title="% of available offensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.orb_pct)}</div><div class="label">ORB%</div></div>
+            <div class="stat-tile" title="% of available defensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.drb_pct)}</div><div class="label">DRB%</div></div>
+            <div class="stat-tile" title="% of opponent possessions ending in a steal by the player while on the floor"><div class="value">${fmtPct(p.stl_pct)}</div><div class="label">STL%</div></div>
+            <div class="stat-tile" title="% of opponent 2-point attempts blocked by the player while on the floor"><div class="value">${fmtPct(p.blk_pct)}</div><div class="label">BLK%</div></div>
+            <div class="stat-tile" title="Free throw attempts per 100 field goal attempts"><div class="value">${fmtStat(p.ft_rate)}</div><div class="label">FT Rate</div></div>
+          </div>
           <p class="player-meta" style="margin-top:14px;">Stats last updated: ${p.last_updated ? new Date(p.last_updated).toLocaleString() : "—"}</p>
           <a class="btn" href="report.html?id=${encodeURIComponent(p.player_id)}">Add a Scouting Report</a>
         </div>
