@@ -57,6 +57,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from io import StringIO
 
+import httpx
 import pandas as pd
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
@@ -144,6 +145,24 @@ CAREER_STAT_LABEL_MAP = {
     "FT%": "ft_pct",
     "3P%": "three_pct",
 }
+
+
+SUPABASE_ATTEMPTS = 4
+
+
+def execute(query):
+    """query.execute(), retried with backoff on dropped connections. Supabase occasionally
+    closes the client's HTTP/2 connection out from under it (seen right after a schema
+    change), and without this one dropped request kills the whole nightly run. Every write
+    here is an idempotent upsert/delete, so a retry is always safe."""
+    for attempt in range(SUPABASE_ATTEMPTS):
+        try:
+            return query.execute()
+        except httpx.TransportError as e:
+            if attempt == SUPABASE_ATTEMPTS - 1:
+                raise
+            print(f"    Supabase connection error, retrying: {e!r}")
+            time.sleep(2**attempt)
 
 
 def fetch_html(page, url):
@@ -481,7 +500,7 @@ def select_all(client, table, columns, season, **eq):
         query = client.table(table).select(columns).eq("season", season)
         for col, val in eq.items():
             query = query.eq(col, val)
-        data = query.range(start, start + page_size - 1).execute().data
+        data = execute(query.range(start, start + page_size - 1)).data
         rows.extend(data)
         if len(data) < page_size:
             return rows
@@ -517,13 +536,15 @@ def update_box_score_cache(client, season):
         # Players first: game_team_stats is what marks a game as cached, so if this dies
         # partway the game just gets re-fetched (and re-upserted idempotently) next run.
         for j in range(0, len(player_rows), 1000):
-            client.table("game_player_stats").upsert(
-                player_rows[j : j + 1000], on_conflict="event_id,espn_player_id"
-            ).execute()
+            execute(
+                client.table("game_player_stats").upsert(
+                    player_rows[j : j + 1000], on_conflict="event_id,espn_player_id"
+                )
+            )
         if team_rows:
-            client.table("game_team_stats").upsert(
-                team_rows, on_conflict="event_id,team_id"
-            ).execute()
+            execute(
+                client.table("game_team_stats").upsert(team_rows, on_conflict="event_id,team_id")
+            )
         print(f"    fetched {min(i + chunk_size, len(new_ids))}/{len(new_ids)}")
 
 
@@ -736,7 +757,7 @@ def upsert_players(client, rows):
     chunk_size = 500
     for i in range(0, len(rows), chunk_size):
         chunk = rows[i : i + chunk_size]
-        client.table("players").upsert(chunk, on_conflict="player_id").execute()
+        execute(client.table("players").upsert(chunk, on_conflict="player_id"))
 
 
 def replace_player_splits(client, player_ids, split_rows):
@@ -744,17 +765,17 @@ def replace_player_splits(client, player_ids, split_rows):
     any qualifying games doesn't keep a stale line from an earlier run."""
     if not player_ids:
         return
-    client.table("player_splits").delete().in_("player_id", player_ids).execute()
+    execute(client.table("player_splits").delete().in_("player_id", player_ids))
     if split_rows:
-        client.table("player_splits").upsert(split_rows, on_conflict="player_id,split").execute()
+        execute(client.table("player_splits").upsert(split_rows, on_conflict="player_id,split"))
 
 
 def upsert_career_stats(client, rows):
     if not rows:
         return
-    client.table("career_stats").upsert(
-        rows, on_conflict="player_id,season_year,school"
-    ).execute()
+    execute(
+        client.table("career_stats").upsert(rows, on_conflict="player_id,season_year,school")
+    )
 
 
 def scrape_and_upsert_career_stats(client, roster_rows):

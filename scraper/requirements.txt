@@ -3,3 +3,4 @@ pandas
 lxml
 supabase
 playwright
+httpx
