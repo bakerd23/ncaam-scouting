@@ -115,6 +115,8 @@ POSS_FTA_COEF = 0.475
 JSON_REQUEST_TIMEOUT = 20
 SLEEP_BETWEEN_PLAYERS = 0.1
 
+STALE_AFTER_DAYS = 7
+
 PAGE_TIMEOUT_MS = 30000
 SLEEP_BETWEEN_TEAMS = 0.3
 
@@ -693,7 +695,18 @@ def get_advanced_stats(client, season):
 ADVANCED_STAT_KEYS = ("orb_pct", "drb_pct", "stl_pct", "blk_pct", "ft_rate")
 
 
-def scrape_team(page, team, advanced=None):
+def player_id_for(espn_player_id, name, team_name):
+    """ESPN's athlete ID is permanent across transfers and name changes, so it's the key -
+    reports and career history stay attached to the player, not to a name+school combo.
+    The name+school slug is only a fallback for the rare player with no ESPN profile link."""
+    if espn_player_id:
+        return f"espn-{espn_player_id}"
+    return f"{slugify(name)}-{slugify(team_name)}"
+
+
+def scrape_team(page, team):
+    """Returns one candidate row per name found on this team's roster and/or stats page.
+    The same player can come back from more than one team (see merge_player_rows)."""
     team_id, team_name, conference, record = (
         team["team_id"],
         team["name"],
@@ -706,48 +719,100 @@ def scrape_team(page, team, advanced=None):
     all_names = set(roster.keys()) | set(stats.keys())
     now = datetime.now(timezone.utc).isoformat()
 
-    rows, split_rows = [], []
+    rows = []
     for name in all_names:
         r_info = roster.get(name, {})
         s_info = stats.get(name, {})
-        player_id = f"{slugify(name)}-{slugify(team_name)}"
         espn_player_id = r_info.get("espn_player_id") or s_info.get("espn_player_id")
-        row = {
-            "player_id": player_id,
-            "name": name,
-            "school": team_name,
-            "conference": conference,
-            "position": r_info.get("position") or s_info.get("position"),
-            "class": r_info.get("class"),
-            "height": r_info.get("height"),
-            "weight": r_info.get("weight"),
-            "record": record,
-            "espn_player_id": espn_player_id,
-            "gp": s_info.get("gp"),
-            "min": s_info.get("min"),
-            "ppg": s_info.get("ppg"),
-            "rpg": s_info.get("rpg"),
-            "apg": s_info.get("apg"),
-            "spg": s_info.get("spg"),
-            "bpg": s_info.get("bpg"),
-            "topg": s_info.get("topg"),
-            "fg_pct": s_info.get("fg_pct"),
-            "three_pct": s_info.get("three_pct"),
-            "ft_pct": s_info.get("ft_pct"),
-            "last_updated": now,
-        }
-        # `advanced` is None when the box-score step failed this run - leave the keys off
-        # entirely so the upsert keeps yesterday's values instead of nulling them out.
-        if advanced is not None:
-            adv = advanced["all"].get(espn_player_id, {})
-            row.update({k: adv.get(k) for k in ADVANCED_STAT_KEYS})
-            hm = advanced["vs_hm"].get(espn_player_id)
-            if hm:
-                split_rows.append(
-                    {"player_id": player_id, "split": "vs_hm", **hm, "last_updated": now}
-                )
-        rows.append(row)
-    return rows, split_rows
+        rows.append(
+            {
+                "player_id": player_id_for(espn_player_id, name, team_name),
+                "name": name,
+                "school": team_name,
+                "conference": conference,
+                "position": r_info.get("position") or s_info.get("position"),
+                "class": r_info.get("class"),
+                "height": r_info.get("height"),
+                "weight": r_info.get("weight"),
+                "record": record,
+                "espn_player_id": espn_player_id,
+                "gp": s_info.get("gp"),
+                "min": s_info.get("min"),
+                "ppg": s_info.get("ppg"),
+                "rpg": s_info.get("rpg"),
+                "apg": s_info.get("apg"),
+                "spg": s_info.get("spg"),
+                "bpg": s_info.get("bpg"),
+                "topg": s_info.get("topg"),
+                "fg_pct": s_info.get("fg_pct"),
+                "three_pct": s_info.get("three_pct"),
+                "ft_pct": s_info.get("ft_pct"),
+                "last_updated": now,
+                "_on_stats_page": bool(s_info),
+            }
+        )
+    return rows
+
+
+ROSTER_FIELDS = ("position", "class", "height", "weight")
+
+
+def merge_player_rows(candidates):
+    """Collapses candidate rows to one per player_id.
+
+    During the offseason ESPN rolls team rosters over to next season one team at a time,
+    while every team's stats page stays on last season until games start. So a transfer
+    shows up on his new team's roster (no stats) *and* his old team's stats page, and a
+    player ESPN renamed shows up under both names on one team. Both share an ESPN ID.
+
+    The row from a stats page wins - that's the school the season's stats are from - and
+    any roster fields it's missing (class, height...) are filled in from the other rows.
+    If he's on more than one stats page (a mid-season transfer), the one where he played
+    the most minutes wins.
+    """
+    by_id = defaultdict(list)
+    for row in candidates:
+        by_id[row["player_id"]].append(row)
+
+    merged = []
+    for rows in by_id.values():
+        rows.sort(
+            key=lambda r: (r["_on_stats_page"], (r["gp"] or 0) * (r["min"] or 0)),
+            reverse=True,
+        )
+        best = dict(rows[0])
+        for other in rows[1:]:
+            for field in ROSTER_FIELDS:
+                if not best.get(field) and other.get(field):
+                    best[field] = other[field]
+        del best["_on_stats_page"]
+        merged.append(best)
+    return merged
+
+
+def attach_advanced(rows, advanced):
+    """Adds the advanced columns to each player row and returns the vs-High/Mid-Major split
+    rows. `advanced` is None when the box-score step failed this run - then the advanced
+    keys are left off entirely so the upsert keeps yesterday's values instead of nulling
+    them out."""
+    split_rows = []
+    if advanced is None:
+        return split_rows
+    for row in rows:
+        espn_player_id = row["espn_player_id"]
+        adv = advanced["all"].get(espn_player_id, {})
+        row.update({k: adv.get(k) for k in ADVANCED_STAT_KEYS})
+        hm = advanced["vs_hm"].get(espn_player_id)
+        if hm:
+            split_rows.append(
+                {
+                    "player_id": row["player_id"],
+                    "split": "vs_hm",
+                    **hm,
+                    "last_updated": row["last_updated"],
+                }
+            )
+    return split_rows
 
 
 def upsert_players(client, rows):
@@ -761,13 +826,56 @@ def upsert_players(client, rows):
 
 
 def replace_player_splits(client, player_ids, split_rows):
-    """Replaces this team's split rows wholesale - delete first, so a player who no longer has
-    any qualifying games doesn't keep a stale line from an earlier run."""
-    if not player_ids:
-        return
-    execute(client.table("player_splits").delete().in_("player_id", player_ids))
-    if split_rows:
-        execute(client.table("player_splits").upsert(split_rows, on_conflict="player_id,split"))
+    """Upserts this run's split rows and deletes any old split line for a player in
+    `player_ids` who no longer has one."""
+    for i in range(0, len(split_rows), 500):
+        execute(
+            client.table("player_splits").upsert(
+                split_rows[i : i + 500], on_conflict="player_id,split"
+            )
+        )
+    has_split = {r["player_id"] for r in split_rows}
+    without = [pid for pid in player_ids if pid not in has_split]
+    # Chunked so the id list stays well under URL-length limits.
+    for i in range(0, len(without), 200):
+        execute(client.table("player_splits").delete().in_("player_id", without[i : i + 200]))
+
+
+def prune_stale_players(client, seen_ids):
+    """Deletes players ESPN hasn't listed on any roster/stats page for STALE_AFTER_DAYS -
+    graduated, left D1, or a leftover row from a rename. The grace period means one failed
+    page load can't wipe out a team (deleting a player also deletes his career history).
+    A player with scouting reports is never deleted."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=STALE_AFTER_DAYS)).isoformat()
+    stale, start = [], 0
+    while True:
+        page = execute(
+            client.table("players")
+            .select("player_id")
+            .lt("last_updated", cutoff)
+            .order("player_id")
+            .range(start, start + 999)
+        ).data
+        stale.extend(r["player_id"] for r in page if r["player_id"] not in seen_ids)
+        if len(page) < 1000:
+            break
+        start += 1000
+    if not stale:
+        return 0
+    with_reports = set()
+    for i in range(0, len(stale), 200):
+        with_reports |= {
+            r["player_id"]
+            for r in execute(
+                client.table("reports").select("player_id").in_("player_id", stale[i : i + 200])
+            ).data
+        }
+    to_delete = [pid for pid in stale if pid not in with_reports]
+    for i in range(0, len(to_delete), 200):
+        execute(client.table("players").delete().in_("player_id", to_delete[i : i + 200]))
+    if with_reports:
+        print(f"  Kept {len(with_reports)} stale players because they have scouting reports.")
+    return len(to_delete)
 
 
 def upsert_career_stats(client, rows):
@@ -841,21 +949,29 @@ def main():
         else:
             print("Skipping career history this run (INCLUDE_CAREER_STATS not set).")
 
-        total_players = 0
+        candidates = []
         for i, team in enumerate(teams, start=1):
             print(f"[{i}/{len(teams)}] {team['name']} ({team['conference']})")
-            rows, split_rows = scrape_team(page, team, advanced)
-            upsert_players(client, rows)
-            if advanced is not None:
-                replace_player_splits(client, [r["player_id"] for r in rows], split_rows)
-            total_players += len(rows)
-            if include_career_stats:
-                scrape_and_upsert_career_stats(client, rows)
+            candidates.extend(scrape_team(page, team))
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         browser.close()
 
-    print(f"\nDone. Upserted stats for {total_players} players across {len(teams)} teams.")
+    # Everything's collected before anything's written, since one player can come back from
+    # two teams (see merge_player_rows) and only the full set can say which row wins.
+    rows = merge_player_rows(candidates)
+    print(f"\nMerged {len(candidates)} roster/stats entries into {len(rows)} players.")
+    split_rows = attach_advanced(rows, advanced)
+    upsert_players(client, rows)
+    if advanced is not None:
+        replace_player_splits(client, [r["player_id"] for r in rows], split_rows)
+    if include_career_stats:
+        scrape_and_upsert_career_stats(client, rows)
+    if not team_limit:
+        pruned = prune_stale_players(client, {r["player_id"] for r in rows})
+        print(f"Pruned {pruned} players not seen on ESPN in {STALE_AFTER_DAYS}+ days.")
+
+    print(f"Done. Upserted stats for {len(rows)} players across {len(teams)} teams.")
 
 
 if __name__ == "__main__":

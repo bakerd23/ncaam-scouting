@@ -3,7 +3,8 @@
 -- have these tables from a previous run, drop them first or skip the `create table` statements.
 
 create table if not exists players (
-  player_id text primary key,        -- slug: name-school, e.g. "cooper-flagg-duke"
+  player_id text primary key,        -- "espn-<ESPN athlete id>", e.g. "espn-5041935" (name-school
+                                     -- slug only if ESPN has no profile link for the player)
   name text not null,
   school text,
   conference text,
