@@ -427,6 +427,10 @@
       });
     }
 
+    // Text columns start A-Z on their first click; every other (stat) column starts with the
+    // highest values on top. A second click on the same column flips it.
+    const TEXT_SORT_KEYS = new Set(["name", "school", "conference", "position", "class"]);
+
     document.querySelectorAll("th[data-sort]").forEach((th) => {
       th.addEventListener("click", () => {
         const key = th.dataset.sort;
@@ -434,7 +438,7 @@
           sortAsc = !sortAsc;
         } else {
           sortKey = key;
-          sortAsc = true;
+          sortAsc = TEXT_SORT_KEYS.has(key);
         }
         updateSortHeaders();
         applyFiltersAndSort();
