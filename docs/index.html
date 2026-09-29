@@ -60,6 +60,7 @@
         <tbody id="players-tbody"></tbody>
       </table>
     </div>
+    <div id="rows-sentinel" aria-hidden="true"></div>
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -352,11 +353,17 @@
       return `<span class="${cls}">${n}</span>`;
     }
 
-    function renderRows(rows) {
-      const tbody = document.getElementById("players-tbody");
-      tbody.innerHTML = rows
-        .map(
-          (p) => `
+    // Rolling render: laying out all ~5,700 rows at once took the browser ~1.5s on every sort,
+    // filter or toggle. Instead the first ROW_CHUNK rows go in right away and the next chunk
+    // is appended whenever the sentinel under the table gets within ROW_PRELOAD_PX of the
+    // bottom of the screen - far enough ahead that scrolling never reaches an empty table.
+    const ROW_CHUNK = 200;
+    const ROW_PRELOAD_PX = 1500;
+    let renderedRows = [];
+    let renderedCount = 0;
+
+    function rowHtml(p) {
+      return `
         <tr onclick="window.location.href='${playerLink(p.player_id, hmOnly)}'">
           <td>${escapeHtml(p.name)}</td>
           <td>${escapeHtml(p.school)}</td>
@@ -377,10 +384,39 @@
           <td>${fmtPct(p.blk_pct)}</td>
           <td>${fmtStat(p.ft_rate)}</td>
           <td>${renderReportCountCell(p.report_count)}</td>
-        </tr>`
-        )
-        .join("");
+        </tr>`;
     }
+
+    function sentinelIsNear() {
+      const top = document.getElementById("rows-sentinel").getBoundingClientRect().top;
+      return top < window.innerHeight + ROW_PRELOAD_PX;
+    }
+
+    // Appends chunks until the sentinel is comfortably below the screen (or rows run out).
+    // Looping here matters: the observer only fires when the sentinel *enters* the preload
+    // zone, so if one chunk isn't enough to push it back out, nothing would fire again.
+    function renderMoreRows() {
+      const tbody = document.getElementById("players-tbody");
+      while (renderedCount < renderedRows.length && sentinelIsNear()) {
+        const next = renderedRows.slice(renderedCount, renderedCount + ROW_CHUNK);
+        tbody.insertAdjacentHTML("beforeend", next.map(rowHtml).join(""));
+        renderedCount += next.length;
+      }
+    }
+
+    function renderRows(rows) {
+      renderedRows = rows;
+      renderedCount = 0;
+      document.getElementById("players-tbody").innerHTML = "";
+      renderMoreRows();
+    }
+
+    new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) renderMoreRows();
+      },
+      { rootMargin: `0px 0px ${ROW_PRELOAD_PX}px 0px` }
+    ).observe(document.getElementById("rows-sentinel"));
 
     function updateSortHeaders() {
       document.querySelectorAll("th[data-sort]").forEach((th) => {
