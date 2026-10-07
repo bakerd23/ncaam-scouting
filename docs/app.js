@@ -75,6 +75,8 @@ async function fetchSplit(playerId, split) {
 const SPLIT_STAT_KEYS = [
   "gp", "min", "ppg", "rpg", "apg", "spg", "bpg", "topg", "fg_pct", "three_pct", "ft_pct",
   "orb_pct", "drb_pct", "stl_pct", "blk_pct", "ft_rate",
+  "tot_min", "tot_pts", "tot_reb", "tot_ast", "tot_stl", "tot_blk", "tot_tov",
+  "fgm", "fga", "fg3m", "fg3a", "ftm", "fta", "fga_pg", "fg3a_pg", "fta_pg",
 ];
 
 // A copy of player `p` with its stat columns swapped for `split`'s (null where the player
@@ -155,6 +157,20 @@ function fmtStat(v, decimals = 1) {
   const n = Number(v);
   if (Number.isNaN(n)) return "—";
   return n.toFixed(decimals);
+}
+
+// Whole-number counts with thousands separators (season totals: 1,274).
+function fmtCount(v) {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  if (Number.isNaN(n)) return "—";
+  return Math.round(n).toLocaleString("en-US");
+}
+
+// "211-521" makes-attempts, or "—" if either is missing.
+function fmtMadeAtt(made, att) {
+  if (made === null || made === undefined || att === null || att === undefined) return "—";
+  return `${fmtCount(made)}-${fmtCount(att)}`;
 }
 
 function fmtPct(v) {

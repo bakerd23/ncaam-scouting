@@ -38,25 +38,40 @@
           <tr>
             <th data-sort="name">Player</th>
             <th data-sort="school">School</th>
-            <th data-sort="conference">Conference</th>
             <th data-sort="position">Pos</th>
             <th data-sort="class">Class</th>
             <th data-sort="gp" title="Games played">GP</th>
-            <th data-sort="min" title="Minutes per game">MPG</th>
-            <th data-sort="ppg">PPG</th>
-            <th data-sort="rpg">RPG</th>
-            <th data-sort="apg">APG</th>
-            <th data-sort="spg">SPG</th>
-            <th data-sort="bpg">BPG</th>
-            <th data-sort="fg_pct">FG%</th>
-            <th data-sort="three_pct">3P%</th>
-            <th data-sort="ft_pct">FT%</th>
+            <th data-sort="min" title="Minutes per game (season total underneath)">MPG</th>
+            <th data-sort="ppg" title="Points per game (season total underneath)">PPG</th>
+            <th data-sort="rpg" title="Rebounds per game (season total underneath)">RPG</th>
+            <th data-sort="apg" title="Assists per game (season total underneath)">APG</th>
+            <th data-sort="spg" title="Steals per game (season total underneath)">SPG</th>
+            <th data-sort="bpg" title="Blocks per game (season total underneath)">BPG</th>
+            <th data-sort="fg_pct" title="FG% (attempts per game); season FGA underneath">FG%</th>
+            <th data-sort="three_pct" title="3P% (attempts per game); season 3PA underneath">3P%</th>
+            <th data-sort="ft_pct" title="FT% (attempts per game); season FTA underneath">FT%</th>
             <th data-sort="orb_pct" title="Offensive Rebound Rate: % of available offensive rebounds grabbed while on the floor (2025-26)">ORB%</th>
             <th data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2025-26)">DRB%</th>
             <th data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2025-26)">STL%</th>
             <th data-sort="blk_pct" title="Block Rate: % of opponent 2-point attempts blocked by the player while on the floor (2025-26)">BLK%</th>
             <th data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (2025-26)">FTr</th>
             <th data-sort="report_count">Reports</th>
+          </tr>
+          <!-- Second header row: sorts by the season-total line under each stat. -->
+          <tr class="sub-head">
+            <th></th>
+            <th data-sort="conference" title="Sort by conference">conf</th>
+            <th colspan="3"></th>
+            <th data-sort="tot_min" title="Sort by total minutes">tot</th>
+            <th data-sort="tot_pts" title="Sort by total points">tot</th>
+            <th data-sort="tot_reb" title="Sort by total rebounds">tot</th>
+            <th data-sort="tot_ast" title="Sort by total assists">tot</th>
+            <th data-sort="tot_stl" title="Sort by total steals">tot</th>
+            <th data-sort="tot_blk" title="Sort by total blocks">tot</th>
+            <th data-sort="fga" title="Sort by total field goal attempts">FGA</th>
+            <th data-sort="fg3a" title="Sort by total 3-point attempts">3PA</th>
+            <th data-sort="fta" title="Sort by total free throw attempts">FTA</th>
+            <th colspan="6"></th>
           </tr>
         </thead>
         <tbody id="players-tbody"></tbody>
@@ -111,6 +126,19 @@
       { value: "fg_pct", label: "FG%", type: "number", group: "Shooting", hint: "45" },
       { value: "three_pct", label: "3P%", type: "number", group: "Shooting", hint: "35" },
       { value: "ft_pct", label: "FT%", type: "number", group: "Shooting", hint: "75" },
+      { value: "fga_pg", label: "FGA per game", type: "number", group: "Shooting" },
+      { value: "fg3a_pg", label: "3PA per game", type: "number", group: "Shooting" },
+      { value: "fta_pg", label: "FTA per game", type: "number", group: "Shooting" },
+      { value: "tot_min", label: "Minutes", type: "number", group: "Season Totals", hint: "300" },
+      { value: "tot_pts", label: "Points", type: "number", group: "Season Totals" },
+      { value: "tot_reb", label: "Rebounds", type: "number", group: "Season Totals" },
+      { value: "tot_ast", label: "Assists", type: "number", group: "Season Totals" },
+      { value: "tot_stl", label: "Steals", type: "number", group: "Season Totals" },
+      { value: "tot_blk", label: "Blocks", type: "number", group: "Season Totals" },
+      { value: "tot_tov", label: "Turnovers", type: "number", group: "Season Totals" },
+      { value: "fga", label: "FGA", type: "number", group: "Season Totals" },
+      { value: "fg3a", label: "3PA", type: "number", group: "Season Totals", hint: "100" },
+      { value: "fta", label: "FTA", type: "number", group: "Season Totals" },
       { value: "orb_pct", label: "ORB%", type: "number", group: "Advanced" },
       { value: "drb_pct", label: "DRB%", type: "number", group: "Advanced" },
       { value: "stl_pct", label: "STL%", type: "number", group: "Advanced" },
@@ -364,24 +392,34 @@
     let renderedRows = [];
     let renderedCount = 0;
 
+    // Per game on top, season total underneath.
+    function countingCell(perGame, total) {
+      return `<td><div>${fmtStat(perGame)}</div><div class="tot">${fmtCount(total)}</div></td>`;
+    }
+
+    // "55.6% (13.7)" - percentage with attempts per game - and total attempts underneath.
+    function shootingCell(pct, attPerGame, attTotal) {
+      const att = attPerGame === null || attPerGame === undefined ? "" : ` <span class="att">(${fmtStat(attPerGame)})</span>`;
+      return `<td><div>${fmtPct(pct)}${att}</div><div class="tot">${attTotal === null || attTotal === undefined ? "" : `(${fmtCount(attTotal)})`}</div></td>`;
+    }
+
     function rowHtml(p) {
       return `
         <tr onclick="window.location.href='${playerLink(p.player_id, hmOnly)}'">
           <td>${escapeHtml(p.name)}</td>
-          <td>${escapeHtml(p.school)}</td>
-          <td title="${escapeHtml(p.conference)}">${escapeHtml(shortConference(p.conference))}</td>
+          <td>${escapeHtml(p.school)}<div class="tot" title="${escapeHtml(p.conference)}">${escapeHtml(shortConference(p.conference))}</div></td>
           <td>${escapeHtml(p.position)}</td>
           <td>${escapeHtml(p.class)}</td>
           <td>${fmtStat(p.gp, 0)}</td>
-          <td>${fmtStat(p.min)}</td>
-          <td>${fmtStat(p.ppg)}</td>
-          <td>${fmtStat(p.rpg)}</td>
-          <td>${fmtStat(p.apg)}</td>
-          <td>${fmtStat(p.spg)}</td>
-          <td>${fmtStat(p.bpg)}</td>
-          <td>${fmtPct(p.fg_pct)}</td>
-          <td>${fmtPct(p.three_pct)}</td>
-          <td>${fmtPct(p.ft_pct)}</td>
+          ${countingCell(p.min, p.tot_min)}
+          ${countingCell(p.ppg, p.tot_pts)}
+          ${countingCell(p.rpg, p.tot_reb)}
+          ${countingCell(p.apg, p.tot_ast)}
+          ${countingCell(p.spg, p.tot_stl)}
+          ${countingCell(p.bpg, p.tot_blk)}
+          ${shootingCell(p.fg_pct, p.fga_pg, p.fga)}
+          ${shootingCell(p.three_pct, p.fg3a_pg, p.fg3a)}
+          ${shootingCell(p.ft_pct, p.fta_pg, p.fta)}
           <td>${fmtPct(p.orb_pct)}</td>
           <td>${fmtPct(p.drb_pct)}</td>
           <td>${fmtPct(p.stl_pct)}</td>

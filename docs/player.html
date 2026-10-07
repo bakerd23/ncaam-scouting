@@ -89,16 +89,16 @@
           ${note}
           <div class="stat-grid">
             <div class="stat-tile"><div class="value">${fmtStat(p.gp, 0)}</div><div class="label">GP</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.min)}</div><div class="label">MIN</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.ppg)}</div><div class="label">PPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.rpg)}</div><div class="label">RPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.apg)}</div><div class="label">APG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.spg)}</div><div class="label">SPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.bpg)}</div><div class="label">BPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtStat(p.topg)}</div><div class="label">TOPG</div></div>
-            <div class="stat-tile"><div class="value">${fmtPct(p.fg_pct)}</div><div class="label">FG%</div></div>
-            <div class="stat-tile"><div class="value">${fmtPct(p.three_pct)}</div><div class="label">3P%</div></div>
-            <div class="stat-tile"><div class="value">${fmtPct(p.ft_pct)}</div><div class="label">FT%</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.min)}</div><div class="sub">${fmtCount(p.tot_min)} total</div><div class="label">MIN</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.ppg)}</div><div class="sub">${fmtCount(p.tot_pts)} total</div><div class="label">PPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.rpg)}</div><div class="sub">${fmtCount(p.tot_reb)} total</div><div class="label">RPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.apg)}</div><div class="sub">${fmtCount(p.tot_ast)} total</div><div class="label">APG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.spg)}</div><div class="sub">${fmtCount(p.tot_stl)} total</div><div class="label">SPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.bpg)}</div><div class="sub">${fmtCount(p.tot_blk)} total</div><div class="label">BPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtStat(p.topg)}</div><div class="sub">${fmtCount(p.tot_tov)} total</div><div class="label">TOPG</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.fg_pct)}</div><div class="sub">${fmtMadeAtt(p.fgm, p.fga)}</div><div class="label">FG%</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.three_pct)}</div><div class="sub">${fmtMadeAtt(p.fg3m, p.fg3a)}</div><div class="label">3P%</div></div>
+            <div class="stat-tile"><div class="value">${fmtPct(p.ft_pct)}</div><div class="sub">${fmtMadeAtt(p.ftm, p.fta)}</div><div class="label">FT%</div></div>
           </div>
           <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(2025-26)</span></h3>
           <div class="stat-grid">

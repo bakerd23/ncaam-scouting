@@ -688,6 +688,23 @@ def compute_player_stats(
             "fg_pct": pct(p["fgm"], p["fga"]),
             "three_pct": pct(p["fg3m"], p["fg3a"]),
             "ft_pct": pct(p["ftm"], p["fta"]),
+            # Season totals and shooting volume. Counts, so no minimum-minutes cutoff.
+            "tot_min": round(p["min"]),
+            "tot_pts": round(p["pts"]),
+            "tot_reb": round(p["reb"]),
+            "tot_ast": round(p["ast"]),
+            "tot_stl": round(p["stl"]),
+            "tot_blk": round(p["blk"]),
+            "tot_tov": round(p["tov"]),
+            "fgm": round(p["fgm"]),
+            "fga": round(p["fga"]),
+            "fg3m": round(p["fg3m"]),
+            "fg3a": round(p["fg3a"]),
+            "ftm": round(p["ftm"]),
+            "fta": round(p["fta"]),
+            "fga_pg": per_game(p["fga"], gp),
+            "fg3a_pg": per_game(p["fg3a"], gp),
+            "fta_pg": per_game(p["fta"], gp),
         }
         advanced = {
             "orb_pct": rate(p["orb"], t["minutes"], p["min"], t["orb"] + t["opp_drb"]),
@@ -741,6 +758,11 @@ def get_advanced_stats(client, season):
 
 
 ADVANCED_STAT_KEYS = ("orb_pct", "drb_pct", "stl_pct", "blk_pct", "ft_rate")
+# Box-score season totals written onto the players row alongside ESPN's per-game stats.
+TOTAL_STAT_KEYS = (
+    "tot_min", "tot_pts", "tot_reb", "tot_ast", "tot_stl", "tot_blk", "tot_tov",
+    "fgm", "fga", "fg3m", "fg3a", "ftm", "fta", "fga_pg", "fg3a_pg", "fta_pg",
+)
 
 
 def player_id_for(espn_player_id, name, team_name):
@@ -849,7 +871,7 @@ def attach_advanced(rows, advanced):
     for row in rows:
         espn_player_id = row["espn_player_id"]
         adv = advanced["all"].get(espn_player_id, {})
-        row.update({k: adv.get(k) for k in ADVANCED_STAT_KEYS})
+        row.update({k: adv.get(k) for k in ADVANCED_STAT_KEYS + TOTAL_STAT_KEYS})
         hm = advanced["vs_hm"].get(espn_player_id)
         if hm:
             split_rows.append(

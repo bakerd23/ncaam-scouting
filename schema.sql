@@ -109,6 +109,44 @@ create table if not exists player_splits (
   primary key (player_id, split)
 );
 
+-- Season totals + shooting volume, summed from the box score cache by the scraper (on both
+-- players and player_splits). tot_* are season totals of the per-game columns; fgm/fga etc.
+-- are total makes/attempts; *_pg are attempts per game (box-score games, so they line up
+-- with the attempt totals even where ESPN's own GP differs by a missing box score).
+alter table players add column if not exists tot_min numeric;
+alter table players add column if not exists tot_pts numeric;
+alter table players add column if not exists tot_reb numeric;
+alter table players add column if not exists tot_ast numeric;
+alter table players add column if not exists tot_stl numeric;
+alter table players add column if not exists tot_blk numeric;
+alter table players add column if not exists tot_tov numeric;
+alter table players add column if not exists fgm numeric;
+alter table players add column if not exists fga numeric;
+alter table players add column if not exists fg3m numeric;
+alter table players add column if not exists fg3a numeric;
+alter table players add column if not exists ftm numeric;
+alter table players add column if not exists fta numeric;
+alter table players add column if not exists fga_pg numeric;
+alter table players add column if not exists fg3a_pg numeric;
+alter table players add column if not exists fta_pg numeric;
+
+alter table player_splits add column if not exists tot_min numeric;
+alter table player_splits add column if not exists tot_pts numeric;
+alter table player_splits add column if not exists tot_reb numeric;
+alter table player_splits add column if not exists tot_ast numeric;
+alter table player_splits add column if not exists tot_stl numeric;
+alter table player_splits add column if not exists tot_blk numeric;
+alter table player_splits add column if not exists tot_tov numeric;
+alter table player_splits add column if not exists fgm numeric;
+alter table player_splits add column if not exists fga numeric;
+alter table player_splits add column if not exists fg3m numeric;
+alter table player_splits add column if not exists fg3a numeric;
+alter table player_splits add column if not exists ftm numeric;
+alter table player_splits add column if not exists fta numeric;
+alter table player_splits add column if not exists fga_pg numeric;
+alter table player_splits add column if not exists fg3a_pg numeric;
+alter table player_splits add column if not exists fta_pg numeric;
+
 create table if not exists reports (
   id uuid primary key default gen_random_uuid(),
   player_id text references players(player_id) on delete cascade,

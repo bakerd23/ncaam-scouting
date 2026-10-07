@@ -198,6 +198,30 @@ tbody tr:hover {
   cursor: pointer;
 }
 
+/* Player list: two lines per player - per game on top, season total underneath in smaller
+   dim text. Shooting cells show attempts next to the percentage. */
+#players-table .tot {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
+#players-table .att {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+#players-table thead tr.sub-head th {
+  padding-top: 0;
+  padding-bottom: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+#players-table thead tr:first-child th {
+  border-bottom: none;
+  padding-bottom: 2px;
+}
+
 /* Player list: slightly tighter cells so all the stat columns fit on a laptop screen
    without scrolling sideways. */
 #players-table thead th,
@@ -256,6 +280,11 @@ tbody tr:hover {
   font-weight: 600;
 }
 
+.stat-tile .sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 1px;
+}
 .stat-tile .label {
   font-size: 11px;
   color: var(--text-dim);
