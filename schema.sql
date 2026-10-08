@@ -121,6 +121,14 @@ alter table players add column if not exists high_school text;
 alter table players add column if not exists stats_school text;
 create index if not exists players_level_idx on players(level);
 
+-- Scout-added players (level = 'ADDED'): anyone not on an ESPN or NJCAA roster - high
+-- schoolers, NAIA, international, a JUCO whose school hasn't posted a roster - added from
+-- the report form so they can be scouted. player_id "added-<uuid>". added_level is what the
+-- scout called him ('High School', 'JUCO', 'D2/D3/NAIA', 'International', 'Other'); added_by
+-- is the scout's name. Neither scraper touches these rows.
+alter table players add column if not exists added_level text;
+alter table players add column if not exists added_by text;
+
 -- Season totals + shooting volume, summed from the box score cache by the scraper (on both
 -- players and player_splits). tot_* are season totals of the per-game columns; fgm/fga etc.
 -- are total makes/attempts; *_pg are attempts per game (box-score games, so they line up
@@ -260,8 +268,21 @@ drop policy if exists "anyone can submit a report" on reports;
 create policy "anyone can submit a report" on reports
   for insert with check (true);
 
--- Deliberately no insert/update/delete policy on `players` or `career_stats` for the public
+-- The public site may add one kind of player row: a scout-added player. The check pins it to
+-- level 'ADDED' with an "added-" id and no ESPN id, so it can't create or overwrite (no update
+-- policy) a D1/JUCO row, and stat columns stay empty.
+drop policy if exists "scouts can add unlisted players" on players;
+create policy "scouts can add unlisted players" on players
+  for insert with check (
+    level = 'ADDED'
+    and player_id like 'added-%'
+    and espn_player_id is null
+    and gp is null
+    and ppg is null
+  );
+
+-- Otherwise no insert/update/delete policy on `players` or `career_stats` for the public
 -- (anon) role, and no update/delete policy on `reports` either. Both `players` and
--- `career_stats` are written only by the daily scraper using the service_role key, which
--- bypasses RLS entirely. Scouts can only ever add new reports, never edit or delete existing
--- ones (or any player/career data) from the public site.
+-- `career_stats` are written only by the daily scrapers using the service_role key, which
+-- bypasses RLS entirely. Scouts can only ever add new reports (and scout-added players),
+-- never edit or delete existing ones (or any player/career data) from the public site.

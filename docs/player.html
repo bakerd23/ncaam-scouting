@@ -158,11 +158,19 @@
             <a href="login.html?return=${encodeURIComponent("player.html?id=" + p.player_id)}">Log in</a> to view them.</p>
         </div>`;
 
-      const isJuco = playerLevel(p) === "JUCO";
+      const lvl = playerLevel(p);
+      const isJuco = lvl === "JUCO";
+      const isAdded = lvl === "ADDED";
       document.body.classList.toggle("juco-mode", isJuco);
+      document.body.classList.toggle("added-mode", isAdded);
       const schoolLine = isJuco
         ? [p.school, `NJCAA ${p.juco_division || ""}`.trim(), p.conference].filter(Boolean).map(escapeHtml).join(" &middot; ")
+        : isAdded
+        ? [p.school, p.added_level].filter(Boolean).map(escapeHtml).join(" &middot; ")
         : `${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; Record: ${escapeHtml(p.record || "—")}`;
+      const addedNote = isAdded
+        ? `<p class="player-meta" style="margin-top:10px;">Added by ${escapeHtml(p.added_by || "a scout")} &middot; not on an ESPN or NJCAA roster, so no stats on file.</p>`
+        : "";
       const origin = [p.hometown, p.high_school].filter(Boolean).map(escapeHtml).join(" &middot; ");
 
       content.innerHTML = `
@@ -173,11 +181,12 @@
           </div>
           <div class="player-meta" style="margin-top:6px;">${schoolLine}</div>
           ${origin ? `<div class="player-meta" style="margin-top:2px;">${origin}</div>` : ""}
+          ${addedNote}
           <div class="d1-only" style="margin-top:14px;">
             <button class="btn secondary" id="hm-toggle" type="button" aria-pressed="false">vs High/Mid Major Only</button>
           </div>
-          <div id="stats-section"></div>
-          <p class="player-meta" style="margin-top:14px;">Stats last updated: ${p.last_updated ? new Date(p.last_updated).toLocaleString() : "—"}</p>
+          <div id="stats-section" class="stats-only"></div>
+          <p class="player-meta stats-only" style="margin-top:14px;">Stats last updated: ${p.last_updated ? new Date(p.last_updated).toLocaleString() : "—"}</p>
           <a class="btn" href="report.html?id=${encodeURIComponent(p.player_id)}">Add a Scouting Report</a>
         </div>
 

@@ -22,6 +22,55 @@
           <input type="text" id="player-search" placeholder="Start typing a player name..." autocomplete="off" />
           <div id="player-search-results" style="display:none;"></div>
           <div id="selected-player" style="display:none;" class="selected-player"></div>
+          <div class="field-hint" id="add-player-hint" style="margin-top:6px;">
+            Player not listed? <a href="#" id="add-player-link">Add him</a>
+          </div>
+          <div id="new-player" class="new-player" hidden>
+            <strong>New player</strong>
+            <div class="field-row">
+              <div class="field">
+                <label for="np-name">Name</label>
+                <input type="text" id="np-name" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="np-school">School / team</label>
+                <input type="text" id="np-school" placeholder="e.g. Montverde Academy" />
+              </div>
+            </div>
+            <div id="np-dupes" class="dupe-warning"></div>
+            <div class="field-row">
+              <div class="field">
+                <label for="np-level">Level</label>
+                <select id="np-level">
+                  <option value="">Choose...</option>
+                  <option>High School</option>
+                  <option>JUCO</option>
+                  <option>D2/D3/NAIA</option>
+                  <option>International</option>
+                  <option>Other</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="np-position">Position <span class="field-hint">(optional)</span></label>
+                <input type="text" id="np-position" placeholder="G, F, C..." />
+              </div>
+            </div>
+            <div class="field-row">
+              <div class="field">
+                <label for="np-class">Class / grad year <span class="field-hint">(optional)</span></label>
+                <input type="text" id="np-class" placeholder="e.g. 2027, SO" />
+              </div>
+              <div class="field">
+                <label for="np-height">Height <span class="field-hint">(optional)</span></label>
+                <input type="text" id="np-height" placeholder="6'5&quot;" />
+              </div>
+            </div>
+            <div class="field">
+              <label for="np-hometown">Hometown <span class="field-hint">(optional)</span></label>
+              <input type="text" id="np-hometown" />
+            </div>
+            <a href="#" id="cancel-add-player">Cancel - search for an existing player instead</a>
+          </div>
         </div>
 
         <div class="field-row">
@@ -98,18 +147,78 @@
       selectedPlayer = p;
       const el = document.getElementById("selected-player");
       el.style.display = "block";
-      el.innerHTML = `Reporting on: <strong>${escapeHtml(p.name)}</strong> (${escapeHtml(p.school)}${playerLevel(p) === "JUCO" ? " · JUCO" : ""}) &middot; <a href="#" id="clear-player">change</a>`;
+      el.innerHTML = `Reporting on: <strong>${escapeHtml(p.name)}</strong> (${escapeHtml(p.school)}${levelTag(p)}) &middot; <a href="#" id="clear-player">change</a>`;
+      setAddingPlayer(false);
+      document.getElementById("add-player-hint").style.display = "none";
       document.getElementById("player-search").style.display = "none";
       document.getElementById("player-search-results").style.display = "none";
       document.getElementById("clear-player").addEventListener("click", (e) => {
         e.preventDefault();
         selectedPlayer = null;
         el.style.display = "none";
+        document.getElementById("add-player-hint").style.display = "";
         document.getElementById("player-search").style.display = "";
         document.getElementById("player-search").value = "";
         document.getElementById("player-search").focus();
       });
     }
+
+    // ---------- Player not listed: add him ----------
+    let addingPlayer = false;
+
+    function setAddingPlayer(on) {
+      addingPlayer = on;
+      document.getElementById("new-player").hidden = !on;
+      document.getElementById("add-player-hint").style.display = on ? "none" : "";
+      document.getElementById("player-search").style.display = on ? "none" : "";
+      document.getElementById("player-search-results").style.display = "none";
+      if (on) {
+        // Carry over whatever was typed into the search box.
+        const typed = document.getElementById("player-search").value.trim();
+        if (typed && !document.getElementById("np-name").value) {
+          document.getElementById("np-name").value = typed;
+        }
+        checkDupes();
+        document.getElementById("np-name").focus();
+      }
+    }
+
+    function normName(s) {
+      return (s || "").toLowerCase().replace(/[^a-z]/g, "");
+    }
+
+    // Before creating a new player, point out anyone already in the database with that name -
+    // a JUCO or D1 player shouldn't get a second, stat-less row.
+    function checkDupes() {
+      const box = document.getElementById("np-dupes");
+      const key = normName(document.getElementById("np-name").value);
+      const matches = key.length < 4 ? [] : allPlayers.filter((p) => normName(p.name) === key).slice(0, 4);
+      box.innerHTML = matches.length
+        ? "Already in the database - is it one of these?<br>" +
+          matches
+            .map(
+              (p) =>
+                `<button type="button" class="btn secondary" data-id="${escapeHtml(p.player_id)}">${escapeHtml(p.name)} (${escapeHtml(p.school)}${levelTag(p)})</button>`
+            )
+            .join("")
+        : "";
+      box.querySelectorAll("button[data-id]").forEach((b) => {
+        b.addEventListener("click", () => {
+          const p = allPlayers.find((pl) => pl.player_id === b.dataset.id);
+          if (p) showSelectedPlayer(p);
+        });
+      });
+    }
+
+    document.getElementById("add-player-link").addEventListener("click", (e) => {
+      e.preventDefault();
+      setAddingPlayer(true);
+    });
+    document.getElementById("cancel-add-player").addEventListener("click", (e) => {
+      e.preventDefault();
+      setAddingPlayer(false);
+    });
+    document.getElementById("np-name").addEventListener("input", checkDupes);
 
     function renderSearchResults(matches) {
       const box = document.getElementById("player-search-results");
@@ -123,7 +232,7 @@
         .slice(0, 25)
         .map(
           (p) =>
-            `<div data-id="${escapeHtml(p.player_id)}">${escapeHtml(p.name)} <span class="player-meta">(${escapeHtml(p.school)}${playerLevel(p) === "JUCO" ? " · JUCO" : ""})</span></div>`
+            `<div data-id="${escapeHtml(p.player_id)}">${escapeHtml(p.name)} <span class="player-meta">(${escapeHtml(p.school)}${levelTag(p)})</span></div>`
         )
         .join("");
       box.querySelectorAll("div[data-id]").forEach((div) => {
@@ -150,8 +259,23 @@
       const msg = document.getElementById("form-msg");
       msg.innerHTML = "";
 
-      if (!selectedPlayer) {
-        msg.innerHTML = '<div class="msg error">Please select a player first.</div>';
+      const newPlayer = addingPlayer
+        ? {
+            name: document.getElementById("np-name").value.trim(),
+            school: document.getElementById("np-school").value.trim(),
+            added_level: document.getElementById("np-level").value,
+            position: document.getElementById("np-position").value.trim() || null,
+            class: document.getElementById("np-class").value.trim() || null,
+            height: document.getElementById("np-height").value.trim() || null,
+            hometown: document.getElementById("np-hometown").value.trim() || null,
+          }
+        : null;
+      if (!selectedPlayer && !newPlayer) {
+        msg.innerHTML = '<div class="msg error">Please select a player first, or add him if he isn\'t listed.</div>';
+        return;
+      }
+      if (newPlayer && (!newPlayer.name || !newPlayer.school || !newPlayer.added_level)) {
+        msg.innerHTML = '<div class="msg error">The new player needs a name, school/team and level.</div>';
         return;
       }
 
@@ -163,7 +287,7 @@
       }
 
       const report = {
-        player_id: selectedPlayer.player_id,
+        player_id: selectedPlayer ? selectedPlayer.player_id : null,
         scout_name: scoutName,
         date_watched: dateWatched,
         context: document.getElementById("context").value.trim() || null,
@@ -177,10 +301,22 @@
       btn.disabled = true;
       btn.textContent = "Submitting...";
       try {
+        let added = null;
+        if (newPlayer) {
+          // Player first, so the report has something to attach to. If the report then
+          // fails, he's still in the database and can be picked from the search next time.
+          added = await addPlayer({ ...newPlayer, added_by: scoutName });
+          allPlayers.push(added);
+          report.player_id = added.player_id;
+        }
         await submitReport(report);
-        msg.innerHTML = '<div class="msg success">Report submitted. Thanks!</div>';
+        msg.innerHTML = added
+          ? `<div class="msg success">Report submitted, and <a href="${playerLink(added.player_id)}">${escapeHtml(added.name)}</a> was added to the database (Players &rarr; Added). Thanks!</div>`
+          : '<div class="msg success">Report submitted. Thanks!</div>';
         document.getElementById("report-form").reset();
         selectedPlayer = null;
+        setAddingPlayer(false);
+        document.getElementById("np-dupes").innerHTML = "";
         document.getElementById("selected-player").style.display = "none";
         document.getElementById("player-search").style.display = "";
       } catch (err) {

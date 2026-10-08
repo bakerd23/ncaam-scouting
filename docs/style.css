@@ -335,8 +335,36 @@ tbody tr:hover {
 
 /* JUCO mode hides what NJCAA data can't support (no box scores -> no ORB/DRB/STL/BLK%, no
    High/Mid Major split, no team records). */
-body.juco-mode .d1-only {
+body.juco-mode .d1-only,
+body.added-mode .d1-only,
+body.added-mode .stats-only {
   display: none !important;
+}
+
+/* Report form: "player not listed" mini-form. */
+.new-player {
+  background: var(--panel-2);
+  border: 1px solid var(--accent-dim);
+  border-radius: 6px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.new-player[hidden] {
+  display: none;
+}
+.new-player .field-row {
+  margin: 0;
+}
+.dupe-warning {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.dupe-warning button {
+  margin: 4px 6px 0 0;
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .btn.secondary[aria-pressed="true"] {

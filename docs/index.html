@@ -21,18 +21,19 @@
       <div class="level-toggle" role="group" aria-label="Player level">
         <button type="button" data-level="D1" aria-pressed="true">D1</button>
         <button type="button" data-level="JUCO" aria-pressed="false" title="NJCAA Division I and II, 2026-27 rosters">JUCO</button>
+        <button type="button" data-level="ADDED" aria-pressed="false" title="Players scouts added from the report form (not on an ESPN or NJCAA roster)">Added</button>
       </div>
       <input type="text" id="search" class="search-box" placeholder="Search player name..." />
       <select id="filter-conference"><option value="">All Conferences</option></select>
       <select id="filter-school"><option value="">All Schools</option></select>
       <select id="filter-position"><option value="">All Positions</option></select>
       <select id="filter-class"><option value="">All Classes</option></select>
-      <button class="btn secondary" id="add-filter-btn" type="button" aria-expanded="false" aria-controls="filter-panel">Filters</button>
+      <button class="btn secondary stats-only" id="add-filter-btn" type="button" aria-expanded="false" aria-controls="filter-panel">Filters</button>
       <button class="btn secondary d1-only" id="hm-toggle" type="button" aria-pressed="false"
         title="Only count games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents">vs High/Mid Major Only</button>
     </div>
 
-    <div id="filter-panel" class="filter-panel" hidden></div>
+    <div id="filter-panel" class="filter-panel stats-only" hidden></div>
 
     <div class="status-line" id="status-line">Loading players...</div>
 
@@ -44,25 +45,25 @@
             <th data-sort="school">School</th>
             <th data-sort="position">Pos</th>
             <th data-sort="class">Class</th>
-            <th data-sort="gp" title="Games played">GP</th>
-            <th data-sort="min" title="Minutes per game (season total underneath)">MPG</th>
-            <th data-sort="ppg" title="Points per game (season total underneath)">PPG</th>
-            <th data-sort="rpg" title="Rebounds per game (season total underneath)">RPG</th>
-            <th data-sort="apg" title="Assists per game (season total underneath)">APG</th>
-            <th data-sort="spg" title="Steals per game (season total underneath)">SPG</th>
-            <th data-sort="bpg" title="Blocks per game (season total underneath)">BPG</th>
-            <th data-sort="fg_pct" title="FG% (attempts per game); season makes-attempts underneath">FG%</th>
-            <th data-sort="three_pct" title="3P% (attempts per game); season makes-attempts underneath">3P%</th>
-            <th data-sort="ft_pct" title="FT% (attempts per game); season makes-attempts underneath">FT%</th>
+            <th class="stats-only" data-sort="gp" title="Games played">GP</th>
+            <th class="stats-only" data-sort="min" title="Minutes per game (season total underneath)">MPG</th>
+            <th class="stats-only" data-sort="ppg" title="Points per game (season total underneath)">PPG</th>
+            <th class="stats-only" data-sort="rpg" title="Rebounds per game (season total underneath)">RPG</th>
+            <th class="stats-only" data-sort="apg" title="Assists per game (season total underneath)">APG</th>
+            <th class="stats-only" data-sort="spg" title="Steals per game (season total underneath)">SPG</th>
+            <th class="stats-only" data-sort="bpg" title="Blocks per game (season total underneath)">BPG</th>
+            <th class="stats-only" data-sort="fg_pct" title="FG% (attempts per game); season makes-attempts underneath">FG%</th>
+            <th class="stats-only" data-sort="three_pct" title="3P% (attempts per game); season makes-attempts underneath">3P%</th>
+            <th class="stats-only" data-sort="ft_pct" title="FT% (attempts per game); season makes-attempts underneath">FT%</th>
             <th class="d1-only" data-sort="orb_pct" title="Offensive Rebound Rate: % of available offensive rebounds grabbed while on the floor (2025-26)">ORB%</th>
             <th class="d1-only" data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2025-26)">DRB%</th>
             <th class="d1-only" data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2025-26)">STL%</th>
             <th class="d1-only" data-sort="blk_pct" title="Block Rate: % of opponent 2-point attempts blocked by the player while on the floor (2025-26)">BLK%</th>
-            <th data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (2025-26)">FTr</th>
+            <th class="stats-only" data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (2025-26)">FTr</th>
             <th data-sort="report_count">Reports</th>
           </tr>
           <!-- Second header row: sorts by the season-total line under each stat. -->
-          <tr class="sub-head">
+          <tr class="sub-head stats-only">
             <th></th>
             <th data-sort="conference" title="Sort by conference">conf</th>
             <th colspan="3"></th>
@@ -109,7 +110,8 @@
     // "D1" or "JUCO". Remembered per browser so a scout working JUCO stays there.
     let level = "D1";
     try {
-      if (localStorage.getItem("playerLevel") === "JUCO") level = "JUCO";
+      const saved = localStorage.getItem("playerLevel");
+      if (saved === "JUCO" || saved === "ADDED") level = saved;
     } catch (e) {}
 
     function setLevel(next) {
@@ -118,16 +120,21 @@
         localStorage.setItem("playerLevel", level);
       } catch (e) {}
       document.body.classList.toggle("juco-mode", level === "JUCO");
+      document.body.classList.toggle("added-mode", level === "ADDED");
       document.querySelectorAll(".level-toggle button").forEach((b) => {
         b.setAttribute("aria-pressed", String(b.dataset.level === level));
       });
-      if (level === "JUCO" && hmOnly) {
-        // No High/Mid Major split for JUCO - drop back to full stats.
+      if (level !== "D1" && hmOnly) {
+        // The High/Mid Major split is D1-only - drop back to full stats.
         hmOnly = false;
         document.getElementById("hm-toggle").setAttribute("aria-pressed", "false");
         allPlayers = basePlayers;
       }
-      if (level === "JUCO" && STAT_OPTIONS.some((o) => o.d1Only && o.value === sortKey)) {
+      const statSort = !["name", "school", "conference", "position", "class", "report_count"].includes(sortKey);
+      if (
+        (level === "JUCO" && STAT_OPTIONS.some((o) => o.d1Only && o.value === sortKey)) ||
+        (level === "ADDED" && statSort)
+      ) {
         sortKey = "name";
         sortAsc = true;
         updateSortHeaders();
@@ -184,7 +191,9 @@
     // Rebuilt on every D1/JUCO switch, from just that level's players.
     function populateFilterOptions() {
       const players = basePlayers.filter((p) => playerLevel(p) === level);
-      const conferences = [...new Set(players.map((p) => p.conference).filter(Boolean))].sort();
+      // Scout-added players have no conference; filter them by what the scout called them.
+      const confKey = (p) => (level === "ADDED" ? p.added_level : p.conference);
+      const conferences = [...new Set(players.map(confKey).filter(Boolean))].sort();
       const schools = [...new Set(players.map((p) => p.school).filter(Boolean))].sort();
       const positions = [...new Set(players.map((p) => p.position).filter(Boolean))].sort();
       const classes = [...new Set(players.map((p) => p.class).filter(Boolean))].sort();
@@ -202,7 +211,7 @@
       };
       // JUCO "conferences" are NJCAA regions - sort Region 2 before Region 10.
       document.getElementById("filter-conference").options[0].textContent =
-        level === "JUCO" ? "All Regions" : "All Conferences";
+        level === "JUCO" ? "All Regions" : level === "ADDED" ? "All Levels" : "All Conferences";
       fill(
         "filter-conference",
         conferences.sort((a, b) =>
@@ -357,7 +366,8 @@
     function playerMatchesDynamicFilter(p, f) {
       if (!f.value) return true;
       const opt = STAT_OPTIONS.find((o) => o.value === f.stat);
-      if (opt && opt.d1Only && level === "JUCO") return true; // hidden in JUCO mode
+      if (opt && opt.d1Only && level !== "D1") return true; // hidden outside D1
+      if (level === "ADDED") return true; // no stats or filter panel for scout-added players
       const type = opt ? opt.type : "number";
 
       if (type === "string") {
@@ -391,7 +401,8 @@
       const f = currentFilters();
       const levelPlayers = allPlayers.filter((p) => playerLevel(p) === level);
       let rows = levelPlayers.filter((p) => {
-        if (f.conference && p.conference !== f.conference) return false;
+        if (f.conference && (level === "ADDED" ? p.added_level : p.conference) !== f.conference)
+          return false;
         if (f.search && !p.name.toLowerCase().includes(f.search)) return false;
         if (f.school && p.school !== f.school) return false;
         if (f.position && p.position !== f.position) return false;
@@ -418,6 +429,7 @@
       renderRows(rows);
       document.getElementById("status-line").textContent =
         `${rows.length} of ${levelPlayers.length} ${level === "JUCO" ? "JUCO " : ""}players` +
+        (level === "ADDED" ? " added by scouts · add more from Submit a Report" : "") +
         (hmOnly ? " · stats from games vs High/Mid Major opponents only" : "") +
         (level === "JUCO" ? " · NJCAA D1/D2 2026-27 rosters, 2025-26 stats where available" : "");
     }
@@ -440,7 +452,7 @@
 
     // Per game on top, season total underneath.
     function countingCell(perGame, total) {
-      return `<td><div>${fmtStat(perGame)}</div><div class="tot">${fmtCount(total)}</div></td>`;
+      return `<td class="stats-only"><div>${fmtStat(perGame)}</div><div class="tot">${fmtCount(total)}</div></td>`;
     }
 
     // "55.6% (13.7)" - percentage with attempts per game - and season makes-attempts
@@ -448,7 +460,7 @@
     function shootingCell(pct, attPerGame, made, attTotal) {
       const att = attPerGame === null || attPerGame === undefined ? "" : ` <span class="att">(${fmtStat(attPerGame)})</span>`;
       const total = attTotal === null || attTotal === undefined ? "" : fmtMadeAtt(made, attTotal);
-      return `<td><div>${fmtPct(pct)}${att}</div><div class="tot">${total}</div></td>`;
+      return `<td class="stats-only"><div>${fmtPct(pct)}${att}</div><div class="tot">${total}</div></td>`;
     }
 
     function rowHtml(p) {
@@ -458,7 +470,7 @@
           <td title="${escapeHtml(p.school)}">${escapeHtml(shortSchool(p.school))}<div class="tot" title="${escapeHtml(p.conference)}">${escapeHtml(conferenceLabel(p))}</div></td>
           <td>${escapeHtml(p.position)}</td>
           <td>${escapeHtml(p.class)}</td>
-          <td>${fmtStat(p.gp, 0)}</td>
+          <td class="stats-only">${fmtStat(p.gp, 0)}</td>
           ${countingCell(p.min, p.tot_min)}
           ${countingCell(p.ppg, p.tot_pts)}
           ${countingCell(p.rpg, p.tot_reb)}
@@ -472,7 +484,7 @@
           <td class="d1-only">${fmtPct(p.drb_pct)}</td>
           <td class="d1-only">${fmtPct(p.stl_pct)}</td>
           <td class="d1-only">${fmtPct(p.blk_pct)}</td>
-          <td>${fmtStat(p.ft_rate, 3)}</td>
+          <td class="stats-only">${fmtStat(p.ft_rate, 3)}</td>
           <td>${renderReportCountCell(p.report_count)}</td>
         </tr>`;
     }

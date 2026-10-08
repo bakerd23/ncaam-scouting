@@ -224,8 +224,8 @@ function shortConference(name) {
   return SHORT_CONFERENCE[name] || name.replace(/\s+Conference$/, "");
 }
 
-// Players are either D1 (ESPN) or JUCO (NJCAA D1/D2). Rows from before the level column
-// existed count as D1.
+// Players are D1 (ESPN), JUCO (NJCAA D1/D2) or ADDED (added by a scout from the report
+// form). Rows from before the level column existed count as D1.
 function playerLevel(p) {
   return p.level || "D1";
 }
@@ -241,12 +241,32 @@ function shortSchool(name) {
     .replace(/\bState College\b/g, "State");
 }
 
-// "D1 · Region 17" for JUCO players, the short conference name for D1.
+// Line under the school: "D1 · Region 17" for JUCO, what the scout called him ("High
+// School") for scout-added players, the short conference name for D1.
 function conferenceLabel(p) {
-  if (playerLevel(p) === "JUCO") {
-    return [p.juco_division, p.conference].filter(Boolean).join(" · ");
-  }
+  const lvl = playerLevel(p);
+  if (lvl === "JUCO") return [p.juco_division, p.conference].filter(Boolean).join(" · ");
+  if (lvl === "ADDED") return p.added_level || "Added by scout";
   return shortConference(p.conference);
+}
+
+// " · JUCO" / " · Added" tag after a school name in pickers; nothing for D1.
+function levelTag(p) {
+  const lvl = playerLevel(p);
+  return lvl === "JUCO" ? " · JUCO" : lvl === "ADDED" ? " · Added" : "";
+}
+
+// Adds a player who isn't on any ESPN/NJCAA roster. The database only accepts rows shaped
+// like this from the public site (level ADDED, "added-" id, no stats) - see schema.sql.
+async function addPlayer(fields) {
+  const row = {
+    ...fields,
+    player_id: `added-${crypto.randomUUID()}`,
+    level: "ADDED",
+  };
+  const { error } = await supabaseClient.from("players").insert(row);
+  if (error) throw error;
+  return row;
 }
 
 function playerLink(playerId, hmOnly = false) {
