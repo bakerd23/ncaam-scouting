@@ -79,8 +79,16 @@
 
     function renderStats() {
       const p = hmOnly ? withSplitStats(currentPlayer, hmSplit) : currentPlayer;
+      const isJuco = playerLevel(currentPlayer) === "JUCO";
+      const jucoNote = !isJuco
+        ? ""
+        : currentPlayer.gp === null || currentPlayer.gp === undefined
+        ? '<p class="player-meta">No 2025-26 NJCAA stats on file (incoming player).</p>'
+        : `<p class="player-meta">2025-26 NJCAA stats${currentPlayer.stats_school ? ` at ${escapeHtml(currentPlayer.stats_school)}` : ""}.</p>`;
       const note =
-        hmOnly && !hmSplit
+        isJuco
+        ? jucoNote
+        : hmOnly && !hmSplit
           ? '<p class="player-meta">No games vs High/Mid Major opponents on record.</p>'
           : hmOnly
           ? '<p class="player-meta">Games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents only (2025-26).</p>'
@@ -102,10 +110,10 @@
           </div>
           <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(2025-26)</span></h3>
           <div class="stat-grid">
-            <div class="stat-tile" title="% of available offensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.orb_pct)}</div><div class="label">ORB%</div></div>
-            <div class="stat-tile" title="% of available defensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.drb_pct)}</div><div class="label">DRB%</div></div>
-            <div class="stat-tile" title="% of opponent possessions ending in a steal by the player while on the floor"><div class="value">${fmtPct(p.stl_pct)}</div><div class="label">STL%</div></div>
-            <div class="stat-tile" title="% of opponent 2-point attempts blocked by the player while on the floor"><div class="value">${fmtPct(p.blk_pct)}</div><div class="label">BLK%</div></div>
+            <div class="stat-tile d1-only" title="% of available offensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.orb_pct)}</div><div class="label">ORB%</div></div>
+            <div class="stat-tile d1-only" title="% of available defensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.drb_pct)}</div><div class="label">DRB%</div></div>
+            <div class="stat-tile d1-only" title="% of opponent possessions ending in a steal by the player while on the floor"><div class="value">${fmtPct(p.stl_pct)}</div><div class="label">STL%</div></div>
+            <div class="stat-tile d1-only" title="% of opponent 2-point attempts blocked by the player while on the floor"><div class="value">${fmtPct(p.blk_pct)}</div><div class="label">BLK%</div></div>
             <div class="stat-tile" title="Free throw attempts per field goal attempt (FTA ÷ FGA)"><div class="value">${fmtStat(p.ft_rate, 3)}</div><div class="label">FT Rate</div></div>
           </div>`;
       document.getElementById("hm-toggle").setAttribute("aria-pressed", String(hmOnly));
@@ -150,16 +158,22 @@
             <a href="login.html?return=${encodeURIComponent("player.html?id=" + p.player_id)}">Log in</a> to view them.</p>
         </div>`;
 
+      const isJuco = playerLevel(p) === "JUCO";
+      document.body.classList.toggle("juco-mode", isJuco);
+      const schoolLine = isJuco
+        ? [p.school, `NJCAA ${p.juco_division || ""}`.trim(), p.conference].filter(Boolean).map(escapeHtml).join(" &middot; ")
+        : `${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; Record: ${escapeHtml(p.record || "—")}`;
+      const origin = [p.hometown, p.high_school].filter(Boolean).map(escapeHtml).join(" &middot; ");
+
       content.innerHTML = `
         <div class="card">
           <div class="player-heading">
             <h1>${escapeHtml(p.name)}</h1>
             <span class="player-meta">${escapeHtml(p.position || "")} &middot; ${escapeHtml(p.class || "")} &middot; ${escapeHtml(p.height || "")} &middot; ${escapeHtml(p.weight || "")}</span>
           </div>
-          <div class="player-meta" style="margin-top:6px;">
-            ${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; Record: ${escapeHtml(p.record || "—")}
-          </div>
-          <div style="margin-top:14px;">
+          <div class="player-meta" style="margin-top:6px;">${schoolLine}</div>
+          ${origin ? `<div class="player-meta" style="margin-top:2px;">${origin}</div>` : ""}
+          <div class="d1-only" style="margin-top:14px;">
             <button class="btn secondary" id="hm-toggle" type="button" aria-pressed="false">vs High/Mid Major Only</button>
           </div>
           <div id="stats-section"></div>
@@ -167,7 +181,7 @@
           <a class="btn" href="report.html?id=${encodeURIComponent(p.player_id)}">Add a Scouting Report</a>
         </div>
 
-        <div class="card">
+        <div class="card d1-only">
           <h2 style="margin-top:0;">Career History</h2>
           ${renderCareerTable(career)}
         </div>

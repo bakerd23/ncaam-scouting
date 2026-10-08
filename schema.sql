@@ -109,6 +109,18 @@ create table if not exists player_splits (
   primary key (player_id, split)
 );
 
+-- JUCO: NJCAA Division I/II players live in the same players table (so scouting reports work
+-- the same way), marked level = 'JUCO'. Everything from the ESPN scraper is 'D1'. JUCO rows
+-- come from scraper/scrape_njcaa.py: player_id "njcaa-<NJCAA person id>", conference holds the
+-- NJCAA region ("Region 17"), juco_division is 'D1'/'D2', and stats_school is the school the
+-- 2025-26 stats are from when that differs from his 2026-27 school.
+alter table players add column if not exists level text not null default 'D1';
+alter table players add column if not exists juco_division text;
+alter table players add column if not exists hometown text;
+alter table players add column if not exists high_school text;
+alter table players add column if not exists stats_school text;
+create index if not exists players_level_idx on players(level);
+
 -- Season totals + shooting volume, summed from the box score cache by the scraper (on both
 -- players and player_splits). tot_* are season totals of the per-game columns; fgm/fga etc.
 -- are total makes/attempts; *_pg are attempts per game (box-score games, so they line up

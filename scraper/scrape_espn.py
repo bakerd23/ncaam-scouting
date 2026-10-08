@@ -911,17 +911,19 @@ def replace_player_splits(client, player_ids, split_rows):
         execute(client.table("player_splits").delete().in_("player_id", without[i : i + 200]))
 
 
-def prune_stale_players(client, seen_ids):
-    """Deletes players ESPN hasn't listed on any roster/stats page for STALE_AFTER_DAYS -
-    graduated, left D1, or a leftover row from a rename. The grace period means one failed
-    page load can't wipe out a team (deleting a player also deletes his career history).
-    A player with scouting reports is never deleted."""
+def prune_stale_players(client, seen_ids, level="D1"):
+    """Deletes `level` players (D1 here; JUCO from scrape_njcaa.py) that this scraper hasn't
+    seen for STALE_AFTER_DAYS - graduated, left, or a leftover row from a rename. Scoped to
+    one level so each scraper only ever prunes its own players. The grace period means one
+    failed page load can't wipe out a team (deleting a player also deletes his career
+    history). A player with scouting reports is never deleted."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=STALE_AFTER_DAYS)).isoformat()
     stale, start = [], 0
     while True:
         page = execute(
             client.table("players")
             .select("player_id")
+            .eq("level", level)
             .lt("last_updated", cutoff)
             .order("player_id")
             .range(start, start + 999)

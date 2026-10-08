@@ -224,6 +224,31 @@ function shortConference(name) {
   return SHORT_CONFERENCE[name] || name.replace(/\s+Conference$/, "");
 }
 
+// Players are either D1 (ESPN) or JUCO (NJCAA D1/D2). Rows from before the level column
+// existed count as D1.
+function playerLevel(p) {
+  return p.level || "D1";
+}
+
+// Display-only: JUCO school names run long ("Shelton State Community College"), which
+// pushes the player table off a laptop screen. Full name stays in the data and on hover.
+function shortSchool(name) {
+  return (name || "")
+    .replace(/\bCommunity & Technical College\b/g, "CTC")
+    .replace(/\bCommunity College\b/g, "CC")
+    .replace(/\bJunior College\b/g, "JC")
+    .replace(/\bTechnical College\b/g, "Tech")
+    .replace(/\bState College\b/g, "State");
+}
+
+// "D1 · Region 17" for JUCO players, the short conference name for D1.
+function conferenceLabel(p) {
+  if (playerLevel(p) === "JUCO") {
+    return [p.juco_division, p.conference].filter(Boolean).join(" · ");
+  }
+  return shortConference(p.conference);
+}
+
 function playerLink(playerId, hmOnly = false) {
   return `player.html?id=${encodeURIComponent(playerId)}${hmOnly ? "&hm=1" : ""}`;
 }

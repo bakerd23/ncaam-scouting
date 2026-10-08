@@ -45,6 +45,14 @@ jobs:
           INCLUDE_CAREER_STATS: ${{ github.event.inputs.include_career_stats }}
         run: python scraper/scrape_espn.py
 
+      # Runs even if the D1 step failed - the two sources are independent.
+      - name: Scrape NJCAA (JUCO) D1/D2 rosters/stats and upsert to Supabase
+        if: ${{ !cancelled() }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scraper/scrape_njcaa.py
+
       - name: Notify on failure
         if: failure()
         run: |

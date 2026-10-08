@@ -18,13 +18,17 @@
 
   <main class="wide">
     <div class="controls">
+      <div class="level-toggle" role="group" aria-label="Player level">
+        <button type="button" data-level="D1" aria-pressed="true">D1</button>
+        <button type="button" data-level="JUCO" aria-pressed="false" title="NJCAA Division I and II, 2026-27 rosters">JUCO</button>
+      </div>
       <input type="text" id="search" class="search-box" placeholder="Search player name..." />
       <select id="filter-conference"><option value="">All Conferences</option></select>
       <select id="filter-school"><option value="">All Schools</option></select>
       <select id="filter-position"><option value="">All Positions</option></select>
       <select id="filter-class"><option value="">All Classes</option></select>
       <button class="btn secondary" id="add-filter-btn" type="button" aria-expanded="false" aria-controls="filter-panel">Filters</button>
-      <button class="btn secondary" id="hm-toggle" type="button" aria-pressed="false"
+      <button class="btn secondary d1-only" id="hm-toggle" type="button" aria-pressed="false"
         title="Only count games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents">vs High/Mid Major Only</button>
     </div>
 
@@ -50,10 +54,10 @@
             <th data-sort="fg_pct" title="FG% (attempts per game); season makes-attempts underneath">FG%</th>
             <th data-sort="three_pct" title="3P% (attempts per game); season makes-attempts underneath">3P%</th>
             <th data-sort="ft_pct" title="FT% (attempts per game); season makes-attempts underneath">FT%</th>
-            <th data-sort="orb_pct" title="Offensive Rebound Rate: % of available offensive rebounds grabbed while on the floor (2025-26)">ORB%</th>
-            <th data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2025-26)">DRB%</th>
-            <th data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2025-26)">STL%</th>
-            <th data-sort="blk_pct" title="Block Rate: % of opponent 2-point attempts blocked by the player while on the floor (2025-26)">BLK%</th>
+            <th class="d1-only" data-sort="orb_pct" title="Offensive Rebound Rate: % of available offensive rebounds grabbed while on the floor (2025-26)">ORB%</th>
+            <th class="d1-only" data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2025-26)">DRB%</th>
+            <th class="d1-only" data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2025-26)">STL%</th>
+            <th class="d1-only" data-sort="blk_pct" title="Block Rate: % of opponent 2-point attempts blocked by the player while on the floor (2025-26)">BLK%</th>
             <th data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (2025-26)">FTr</th>
             <th data-sort="report_count">Reports</th>
           </tr>
@@ -71,7 +75,8 @@
             <th data-sort="fga" title="Sort by total field goal attempts">FGA</th>
             <th data-sort="fg3a" title="Sort by total 3-point attempts">3PA</th>
             <th data-sort="fta" title="Sort by total free throw attempts">FTA</th>
-            <th colspan="6"></th>
+            <th class="d1-only" colspan="4"></th>
+            <th colspan="2"></th>
           </tr>
         </thead>
         <tbody id="players-tbody"></tbody>
@@ -101,6 +106,35 @@
       return hmSplitsPromise;
     }
     let hmOnly = false;
+    // "D1" or "JUCO". Remembered per browser so a scout working JUCO stays there.
+    let level = "D1";
+    try {
+      if (localStorage.getItem("playerLevel") === "JUCO") level = "JUCO";
+    } catch (e) {}
+
+    function setLevel(next) {
+      level = next;
+      try {
+        localStorage.setItem("playerLevel", level);
+      } catch (e) {}
+      document.body.classList.toggle("juco-mode", level === "JUCO");
+      document.querySelectorAll(".level-toggle button").forEach((b) => {
+        b.setAttribute("aria-pressed", String(b.dataset.level === level));
+      });
+      if (level === "JUCO" && hmOnly) {
+        // No High/Mid Major split for JUCO - drop back to full stats.
+        hmOnly = false;
+        document.getElementById("hm-toggle").setAttribute("aria-pressed", "false");
+        allPlayers = basePlayers;
+      }
+      if (level === "JUCO" && STAT_OPTIONS.some((o) => o.d1Only && o.value === sortKey)) {
+        sortKey = "name";
+        sortAsc = true;
+        updateSortHeaders();
+      }
+      populateFilterOptions();
+      applyFiltersAndSort();
+    }
     let sortKey = "name";
     let sortAsc = true;
     let dynamicFilters = [];
@@ -114,7 +148,7 @@
       { value: "class", label: "Class", type: "string", group: "Player", hint: "SR" },
       { value: "height", label: "Height", type: "height", group: "Player", hint: "6'5\"" },
       { value: "weight", label: "Weight", type: "weight", group: "Player", hint: "200" },
-      { value: "record", label: "Team Win %", type: "record", group: "Player", hint: "0.600" },
+      { value: "record", label: "Team Win %", type: "record", group: "Player", hint: "0.600", d1Only: true },
       { value: "gp", label: "Games Played", type: "number", group: "Per Game" },
       { value: "min", label: "Minutes", type: "number", group: "Per Game" },
       { value: "ppg", label: "Points", type: "number", group: "Per Game" },
@@ -139,22 +173,26 @@
       { value: "fga", label: "FGA", type: "number", group: "Season Totals" },
       { value: "fg3a", label: "3PA", type: "number", group: "Season Totals", hint: "100" },
       { value: "fta", label: "FTA", type: "number", group: "Season Totals" },
-      { value: "orb_pct", label: "ORB%", type: "number", group: "Advanced" },
-      { value: "drb_pct", label: "DRB%", type: "number", group: "Advanced" },
-      { value: "stl_pct", label: "STL%", type: "number", group: "Advanced" },
-      { value: "blk_pct", label: "BLK%", type: "number", group: "Advanced" },
+      { value: "orb_pct", label: "ORB%", type: "number", group: "Advanced", d1Only: true },
+      { value: "drb_pct", label: "DRB%", type: "number", group: "Advanced", d1Only: true },
+      { value: "stl_pct", label: "STL%", type: "number", group: "Advanced", d1Only: true },
+      { value: "blk_pct", label: "BLK%", type: "number", group: "Advanced", d1Only: true },
       { value: "ft_rate", label: "FT Rate", type: "number", group: "Advanced", hint: "0.350" },
       { value: "report_count", label: "Reports", type: "number", group: "Reports" },
     ];
 
+    // Rebuilt on every D1/JUCO switch, from just that level's players.
     function populateFilterOptions() {
-      const conferences = [...new Set(allPlayers.map((p) => p.conference).filter(Boolean))].sort();
-      const schools = [...new Set(allPlayers.map((p) => p.school).filter(Boolean))].sort();
-      const positions = [...new Set(allPlayers.map((p) => p.position).filter(Boolean))].sort();
-      const classes = [...new Set(allPlayers.map((p) => p.class).filter(Boolean))].sort();
+      const players = basePlayers.filter((p) => playerLevel(p) === level);
+      const conferences = [...new Set(players.map((p) => p.conference).filter(Boolean))].sort();
+      const schools = [...new Set(players.map((p) => p.school).filter(Boolean))].sort();
+      const positions = [...new Set(players.map((p) => p.position).filter(Boolean))].sort();
+      const classes = [...new Set(players.map((p) => p.class).filter(Boolean))].sort();
 
       const fill = (id, values, label = (v) => v) => {
         const el = document.getElementById(id);
+        el.length = 1; // keep the "All ..." option
+        el.selectedIndex = 0;
         for (const v of values) {
           const opt = document.createElement("option");
           opt.value = v;
@@ -162,9 +200,14 @@
           el.appendChild(opt);
         }
       };
+      // JUCO "conferences" are NJCAA regions - sort Region 2 before Region 10.
+      document.getElementById("filter-conference").options[0].textContent =
+        level === "JUCO" ? "All Regions" : "All Conferences";
       fill(
         "filter-conference",
-        conferences.sort((a, b) => shortConference(a).localeCompare(shortConference(b))),
+        conferences.sort((a, b) =>
+          shortConference(a).localeCompare(shortConference(b), undefined, { numeric: true })
+        ),
         shortConference
       );
       fill("filter-school", schools);
@@ -197,7 +240,7 @@
           ${STAT_OPTIONS.filter((o) => o.group === g)
             .map(
               (o) => `
-          <div class="filter-line" data-stat="${o.value}">
+          <div class="filter-line${o.d1Only ? " d1-only" : ""}" data-stat="${o.value}">
             <label for="flt-${o.value}">${o.label}</label>
             <select data-role="comparison" aria-label="${o.label} comparison">
               ${comparisonOptionsFor(o.type).map(([v, label]) => `<option value="${v}">${label}</option>`).join("")}
@@ -314,6 +357,7 @@
     function playerMatchesDynamicFilter(p, f) {
       if (!f.value) return true;
       const opt = STAT_OPTIONS.find((o) => o.value === f.stat);
+      if (opt && opt.d1Only && level === "JUCO") return true; // hidden in JUCO mode
       const type = opt ? opt.type : "number";
 
       if (type === "string") {
@@ -345,7 +389,8 @@
 
     function applyFiltersAndSort() {
       const f = currentFilters();
-      let rows = allPlayers.filter((p) => {
+      const levelPlayers = allPlayers.filter((p) => playerLevel(p) === level);
+      let rows = levelPlayers.filter((p) => {
         if (f.conference && p.conference !== f.conference) return false;
         if (f.search && !p.name.toLowerCase().includes(f.search)) return false;
         if (f.school && p.school !== f.school) return false;
@@ -372,8 +417,9 @@
 
       renderRows(rows);
       document.getElementById("status-line").textContent =
-        `${rows.length} of ${allPlayers.length} players` +
-        (hmOnly ? " · stats from games vs High/Mid Major opponents only" : "");
+        `${rows.length} of ${levelPlayers.length} ${level === "JUCO" ? "JUCO " : ""}players` +
+        (hmOnly ? " · stats from games vs High/Mid Major opponents only" : "") +
+        (level === "JUCO" ? " · NJCAA D1/D2 2026-27 rosters, 2025-26 stats where available" : "");
     }
 
     function renderReportCountCell(count) {
@@ -409,7 +455,7 @@
       return `
         <tr onclick="window.location.href='${playerLink(p.player_id, hmOnly)}'">
           <td>${escapeHtml(p.name)}</td>
-          <td>${escapeHtml(p.school)}<div class="tot" title="${escapeHtml(p.conference)}">${escapeHtml(shortConference(p.conference))}</div></td>
+          <td title="${escapeHtml(p.school)}">${escapeHtml(shortSchool(p.school))}<div class="tot" title="${escapeHtml(p.conference)}">${escapeHtml(conferenceLabel(p))}</div></td>
           <td>${escapeHtml(p.position)}</td>
           <td>${escapeHtml(p.class)}</td>
           <td>${fmtStat(p.gp, 0)}</td>
@@ -422,10 +468,10 @@
           ${shootingCell(p.fg_pct, p.fga_pg, p.fgm, p.fga)}
           ${shootingCell(p.three_pct, p.fg3a_pg, p.fg3m, p.fg3a)}
           ${shootingCell(p.ft_pct, p.fta_pg, p.ftm, p.fta)}
-          <td>${fmtPct(p.orb_pct)}</td>
-          <td>${fmtPct(p.drb_pct)}</td>
-          <td>${fmtPct(p.stl_pct)}</td>
-          <td>${fmtPct(p.blk_pct)}</td>
+          <td class="d1-only">${fmtPct(p.orb_pct)}</td>
+          <td class="d1-only">${fmtPct(p.drb_pct)}</td>
+          <td class="d1-only">${fmtPct(p.stl_pct)}</td>
+          <td class="d1-only">${fmtPct(p.blk_pct)}</td>
           <td>${fmtStat(p.ft_rate, 3)}</td>
           <td>${renderReportCountCell(p.report_count)}</td>
         </tr>`;
@@ -512,6 +558,12 @@
       applyFiltersAndSort();
     });
 
+    document.querySelectorAll(".level-toggle button").forEach((b) => {
+      b.addEventListener("click", () => {
+        if (b.dataset.level !== level) setLevel(b.dataset.level);
+      });
+    });
+
     ["search", "filter-conference", "filter-school", "filter-position", "filter-class"].forEach(
       (id) => {
         document.getElementById(id).addEventListener("input", applyFiltersAndSort);
@@ -532,9 +584,8 @@
           report_count: reportCounts[p.player_id] || 0,
         }));
         allPlayers = basePlayers;
-        populateFilterOptions();
         updateSortHeaders();
-        applyFiltersAndSort();
+        setLevel(level);
         loadHmSplits().catch((err) => console.error(err)); // background preload
       } catch (e) {
         document.getElementById("status-line").textContent =

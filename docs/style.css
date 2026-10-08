@@ -313,6 +313,32 @@ tbody tr:hover {
   color: var(--text);
   border: 1px solid var(--border);
 }
+/* D1 | JUCO switch on the player list. */
+.level-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.level-toggle button {
+  background: var(--panel-2);
+  color: var(--text-dim);
+  border: none;
+  padding: 10px 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.level-toggle button[aria-pressed="true"] {
+  background: var(--accent);
+  color: #101820;
+}
+
+/* JUCO mode hides what NJCAA data can't support (no box scores -> no ORB/DRB/STL/BLK%, no
+   High/Mid Major split, no team records). */
+body.juco-mode .d1-only {
+  display: none !important;
+}
+
 .btn.secondary[aria-pressed="true"] {
   background: var(--accent);
   color: #101820;
