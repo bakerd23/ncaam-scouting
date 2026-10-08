@@ -47,9 +47,9 @@
             <th data-sort="apg" title="Assists per game (season total underneath)">APG</th>
             <th data-sort="spg" title="Steals per game (season total underneath)">SPG</th>
             <th data-sort="bpg" title="Blocks per game (season total underneath)">BPG</th>
-            <th data-sort="fg_pct" title="FG% (attempts per game); season FGA underneath">FG%</th>
-            <th data-sort="three_pct" title="3P% (attempts per game); season 3PA underneath">3P%</th>
-            <th data-sort="ft_pct" title="FT% (attempts per game); season FTA underneath">FT%</th>
+            <th data-sort="fg_pct" title="FG% (attempts per game); season makes-attempts underneath">FG%</th>
+            <th data-sort="three_pct" title="3P% (attempts per game); season makes-attempts underneath">3P%</th>
+            <th data-sort="ft_pct" title="FT% (attempts per game); season makes-attempts underneath">FT%</th>
             <th data-sort="orb_pct" title="Offensive Rebound Rate: % of available offensive rebounds grabbed while on the floor (2025-26)">ORB%</th>
             <th data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2025-26)">DRB%</th>
             <th data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2025-26)">STL%</th>
@@ -397,10 +397,12 @@
       return `<td><div>${fmtStat(perGame)}</div><div class="tot">${fmtCount(total)}</div></td>`;
     }
 
-    // "55.6% (13.7)" - percentage with attempts per game - and total attempts underneath.
-    function shootingCell(pct, attPerGame, attTotal) {
+    // "55.6% (13.7)" - percentage with attempts per game - and season makes-attempts
+    // ("290-522") underneath.
+    function shootingCell(pct, attPerGame, made, attTotal) {
       const att = attPerGame === null || attPerGame === undefined ? "" : ` <span class="att">(${fmtStat(attPerGame)})</span>`;
-      return `<td><div>${fmtPct(pct)}${att}</div><div class="tot">${attTotal === null || attTotal === undefined ? "" : `(${fmtCount(attTotal)})`}</div></td>`;
+      const total = attTotal === null || attTotal === undefined ? "" : fmtMadeAtt(made, attTotal);
+      return `<td><div>${fmtPct(pct)}${att}</div><div class="tot">${total}</div></td>`;
     }
 
     function rowHtml(p) {
@@ -417,9 +419,9 @@
           ${countingCell(p.apg, p.tot_ast)}
           ${countingCell(p.spg, p.tot_stl)}
           ${countingCell(p.bpg, p.tot_blk)}
-          ${shootingCell(p.fg_pct, p.fga_pg, p.fga)}
-          ${shootingCell(p.three_pct, p.fg3a_pg, p.fg3a)}
-          ${shootingCell(p.ft_pct, p.fta_pg, p.fta)}
+          ${shootingCell(p.fg_pct, p.fga_pg, p.fgm, p.fga)}
+          ${shootingCell(p.three_pct, p.fg3a_pg, p.fg3m, p.fg3a)}
+          ${shootingCell(p.ft_pct, p.fta_pg, p.ftm, p.fta)}
           <td>${fmtPct(p.orb_pct)}</td>
           <td>${fmtPct(p.drb_pct)}</td>
           <td>${fmtPct(p.stl_pct)}</td>
