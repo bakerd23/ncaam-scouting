@@ -177,7 +177,7 @@
         <div class="card">
           <div class="player-heading">
             <h1>${escapeHtml(p.name)}</h1>
-            <span class="player-meta">${escapeHtml(p.position || "")} &middot; ${escapeHtml(p.class || "")} &middot; ${escapeHtml(p.height || "")} &middot; ${escapeHtml(p.weight || "")}</span>
+            <span class="player-meta">${[p.position, p.class, p.height, p.weight].filter(Boolean).map(escapeHtml).join(" &middot; ")}</span>
           </div>
           <div class="player-meta" style="margin-top:6px;">${schoolLine}</div>
           ${origin ? `<div class="player-meta" style="margin-top:2px;">${origin}</div>` : ""}
