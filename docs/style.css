@@ -341,6 +341,29 @@ body.added-mode .stats-only {
   display: none !important;
 }
 
+/* Offline outbox: reports saved on this device, waiting for a connection. */
+.outbox-banner {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  font-size: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.outbox-banner .btn {
+  padding: 6px 12px;
+  flex-shrink: 0;
+}
+
 /* Report form: "player not listed" mini-form. */
 .new-player {
   background: var(--panel-2);

@@ -297,36 +297,56 @@
         report[el.dataset.column] = el.value.trim() || null;
       });
 
+      // Ids are fixed now so a later retry (from the offline outbox) can't double-save.
+      const item = { report: { ...report, id: crypto.randomUUID() }, newPlayer: null, savedAt: new Date().toISOString() };
+      if (newPlayer) {
+        // Player first, so the report has something to attach to.
+        item.newPlayer = newPlayerRow({ ...newPlayer, added_by: scoutName });
+        item.report.player_id = item.newPlayer.player_id;
+      }
+      const playerName = item.newPlayer ? item.newPlayer.name : selectedPlayer.name;
+
       const btn = document.getElementById("submit-btn");
       btn.disabled = true;
       btn.textContent = "Submitting...";
       try {
-        let added = null;
-        if (newPlayer) {
-          // Player first, so the report has something to attach to. If the report then
-          // fails, he's still in the database and can be picked from the search next time.
-          added = await addPlayer({ ...newPlayer, added_by: scoutName });
-          allPlayers.push(added);
-          report.player_id = added.player_id;
-        }
-        await submitReport(report);
+        if (!navigator.onLine) throw new TypeError("Failed to fetch"); // skip the wait
+        await sendReport(item);
+        const added = item.newPlayer;
+        if (added) allPlayers.push(added);
         msg.innerHTML = added
           ? `<div class="msg success">Report submitted, and <a href="${playerLink(added.player_id)}">${escapeHtml(added.name)}</a> was added to the database (Players &rarr; Added). Thanks!</div>`
           : '<div class="msg success">Report submitted. Thanks!</div>';
-        document.getElementById("report-form").reset();
-        selectedPlayer = null;
-        setAddingPlayer(false);
-        document.getElementById("np-dupes").innerHTML = "";
-        document.getElementById("selected-player").style.display = "none";
-        document.getElementById("player-search").style.display = "";
+        resetReportForm();
       } catch (err) {
-        msg.innerHTML = `<div class="msg error">Failed to submit: ${escapeHtml(err.message)}</div>`;
+        if (isNetworkError(err)) {
+          try {
+            queueReport(item);
+            msg.innerHTML = `<div class="msg success">No connection - your report on ${escapeHtml(playerName)} is saved on this device and will send automatically when you're back online. Don't clear your browser data until it does.</div>`;
+            resetReportForm();
+            renderOutboxBanner();
+          } catch (storageErr) {
+            msg.innerHTML = '<div class="msg error">No connection, and this browser wouldn\'t let the report be saved on the device. Keep this tab open and press Submit again once you have signal.</div>';
+          }
+        } else {
+          msg.innerHTML = `<div class="msg error">Failed to submit: ${escapeHtml(err.message)}</div>`;
+        }
         console.error(err);
       } finally {
         btn.disabled = false;
         btn.textContent = "Submit Report";
       }
     });
+
+    function resetReportForm() {
+      document.getElementById("report-form").reset();
+      selectedPlayer = null;
+      setAddingPlayer(false);
+      document.getElementById("np-dupes").innerHTML = "";
+      document.getElementById("selected-player").style.display = "none";
+      document.getElementById("add-player-hint").style.display = "";
+      document.getElementById("player-search").style.display = "";
+    }
 
     (async function init() {
       try {

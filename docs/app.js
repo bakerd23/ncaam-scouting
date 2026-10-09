@@ -120,11 +120,6 @@ async function fetchReportCounts() {
   return counts;
 }
 
-async function submitReport(report) {
-  const { error } = await supabaseClient.from("reports").insert(report);
-  if (error) throw error;
-}
-
 async function getSession() {
   const { data, error } = await supabaseClient.auth.getSession();
   if (error) throw error;
@@ -258,16 +253,117 @@ function levelTag(p) {
 
 // Adds a player who isn't on any ESPN/NJCAA roster. The database only accepts rows shaped
 // like this from the public site (level ADDED, "added-" id, no stats) - see schema.sql.
-async function addPlayer(fields) {
-  const row = {
+function newPlayerRow(fields) {
+  return {
     ...fields,
     player_id: `added-${crypto.randomUUID()}`,
     level: "ADDED",
   };
-  const { error } = await supabaseClient.from("players").insert(row);
-  if (error) throw error;
-  return row;
 }
+
+// ---------- Offline outbox ----------
+// A report submitted with no connection is saved in this browser's localStorage and sent
+// later - automatically when the connection comes back, or whenever any page of the site
+// is opened online. It only lives on that device/browser until it's sent.
+const OUTBOX_KEY = "reportOutbox";
+
+function readOutbox() {
+  try {
+    return JSON.parse(localStorage.getItem(OUTBOX_KEY) || "[]");
+  } catch (e) {
+    return [];
+  }
+}
+
+// Throws if the browser won't store it (private mode, storage blocked) - callers handle that.
+function writeOutbox(items) {
+  localStorage.setItem(OUTBOX_KEY, JSON.stringify(items));
+}
+
+function queueReport(item) {
+  writeOutbox([...readOutbox(), item]);
+}
+
+function isNetworkError(err) {
+  if (!navigator.onLine) return true;
+  const m = String((err && (err.message || err)) || "");
+  return /failed to fetch|networkerror|load failed|network request failed/i.test(m);
+}
+
+function isDuplicate(err) {
+  return !!err && (err.code === "23505" || /duplicate key/i.test(err.message || ""));
+}
+
+// Sends one report, creating its new player first if it has one. `item` carries the report
+// and player ids up front, so a retry after a send that half-finished (or finished but the
+// reply never arrived) hits "duplicate key" and counts as done instead of saving it twice.
+async function sendReport(item) {
+  if (item.newPlayer) {
+    const { error } = await supabaseClient.from("players").insert(item.newPlayer);
+    if (error && !isDuplicate(error)) throw error;
+  }
+  const { error } = await supabaseClient.from("reports").insert(item.report);
+  if (error && !isDuplicate(error)) throw error;
+}
+
+let outboxFlushing = false;
+
+async function flushOutbox() {
+  if (outboxFlushing || !navigator.onLine) return;
+  outboxFlushing = true;
+  try {
+    for (const item of readOutbox()) {
+      try {
+        await sendReport(item);
+        writeOutbox(readOutbox().filter((x) => x.report.id !== item.report.id));
+      } catch (err) {
+        if (isNetworkError(err)) break; // still offline - try again later
+        // Rejected for some other reason: keep it (never silently drop a report) and say why.
+        writeOutbox(
+          readOutbox().map((x) =>
+            x.report.id === item.report.id ? { ...x, lastError: err.message || String(err) } : x
+          )
+        );
+      }
+    }
+  } catch (e) {
+    console.error(e);
+  } finally {
+    outboxFlushing = false;
+    renderOutboxBanner();
+  }
+}
+
+// Small bar at the bottom of every page while reports are waiting on this device.
+function renderOutboxBanner() {
+  const items = readOutbox();
+  let bar = document.getElementById("outbox-banner");
+  if (!items.length) {
+    if (bar) bar.remove();
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "outbox-banner";
+    bar.className = "outbox-banner";
+    document.body.appendChild(bar);
+  }
+  const failed = items.filter((x) => x.lastError);
+  const n = items.length;
+  bar.innerHTML = `
+    <span>${n} report${n === 1 ? "" : "s"} saved on this device, waiting to send${
+      navigator.onLine ? "" : " (no connection)"
+    }.${failed.length ? ` ${failed.length} couldn't be sent: ${escapeHtml(failed[0].lastError)}` : ""}</span>
+    <button type="button" class="btn secondary" id="outbox-send">Send now</button>`;
+  bar.querySelector("#outbox-send").addEventListener("click", flushOutbox);
+}
+
+window.addEventListener("online", flushOutbox);
+window.addEventListener("offline", renderOutboxBanner);
+// Mobile browsers don't always fire "online", so also retry every minute while anything's queued.
+setInterval(() => {
+  if (readOutbox().length) flushOutbox();
+}, 60000);
 
 function playerLink(playerId, hmOnly = false) {
   return `player.html?id=${encodeURIComponent(playerId)}${hmOnly ? "&hm=1" : ""}`;
@@ -285,3 +381,6 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 }
+
+renderOutboxBanner();
+flushOutbox();
