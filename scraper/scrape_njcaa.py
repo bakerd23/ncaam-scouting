@@ -59,6 +59,14 @@ STATS_URL = (
     "&include_players=true&include_games=false&player_offset={offset}"
 )
 STATS_PAGE_SIZE = 250
+
+# Some schools' "2026-27" rosters on NJCAA are really last season's roster carried over -
+# 100% the same names, sophomores who've already left for D1 included. JUCO rosters normally
+# turn over half or more each year (2026-10-08: 70 of 104 posted rosters had under 50% of
+# last year's team; 28 had 75-100%). A roster where at least this share played for the
+# same school last season is treated as not posted yet, and drops back in automatically
+# once the school puts up its real one.
+STALE_ROSTER_SHARE = 0.75
 WORKERS = 6
 
 POSITIONS = {
@@ -190,6 +198,45 @@ def stat_line(stats):
 STAT_KEYS = tuple(stat_line({"gp": 1}).keys())
 
 
+def split_stale_rosters(rosters, last_season):
+    """(current, stale): stale rosters are mostly last season's team at the same school."""
+    played_here = {(norm_name(p.get("displayName")), p.get("schoolTenantId")) for p in last_season}
+    current, stale = [], []
+    for school, roster in rosters:
+        returning = sum(
+            1 for a in roster if (norm_name(a.get("name")), school["tenantId"]) in played_here
+        )
+        share = returning / len(roster) if roster else 0
+        (stale if share >= STALE_ROSTER_SHARE else current).append((school, roster))
+    return current, stale
+
+
+def delete_players(client, player_ids):
+    """Removes JUCO players right away (no 7-day wait) - for schools whose posted roster is
+    really last year's. A player with scouting reports is kept."""
+    ids = list(player_ids)
+    with_reports = set()
+    for i in range(0, len(ids), 200):
+        with_reports |= {
+            r["player_id"]
+            for r in execute(
+                client.table("reports").select("player_id").in_("player_id", ids[i : i + 200])
+            ).data
+        }
+    to_delete = [pid for pid in ids if pid not in with_reports]
+    deleted = 0
+    for i in range(0, len(to_delete), 200):
+        deleted += len(
+            execute(
+                client.table("players")
+                .delete()
+                .eq("level", "JUCO")
+                .in_("player_id", to_delete[i : i + 200])
+            ).data
+        )
+    return deleted, len(with_reports)
+
+
 def build_rows(rosters, last_season):
     by_school = {}
     by_name = defaultdict(list)
@@ -280,6 +327,12 @@ def main():
     last_season = get_last_season_stats()
     print(f"{len(last_season)} {STATS_SEASON} stat lines.")
 
+    rosters, stale = split_stale_rosters(rosters, last_season)
+    print(
+        f"Skipping {len(stale)} rosters that are mostly last season's team (not really "
+        f"{ROSTER_SEASON} yet): " + ", ".join(sorted(s["school"] for s, _ in stale))
+    )
+
     rows, matched = build_rows(rosters, last_season)
     # One row per player, in case a school lists someone twice.
     rows = list({r["player_id"]: r for r in rows}.values())
@@ -287,6 +340,17 @@ def main():
 
     for i in range(0, len(rows), 500):
         execute(client.table("players").upsert(rows[i : i + 500], on_conflict="player_id"))
+
+    current_ids = {r["player_id"] for r in rows}
+    stale_ids = {
+        f"njcaa-{a.get('personId') or a.get('playerId')}"
+        for _, roster in stale
+        for a in roster
+        if a.get("personId") or a.get("playerId")
+    } - current_ids
+    if stale_ids:
+        deleted, kept = delete_players(client, stale_ids)
+        print(f"Removed {deleted} players from last-season rosters ({kept} kept for their reports).")
 
     # Only prune when every roster call worked - otherwise a school whose roster just failed
     # to load would start aging out (the 7-day grace period also covers this).
