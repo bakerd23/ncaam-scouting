@@ -1,9 +1,11 @@
 """
 Daily D1 men's college basketball scraper.
 
-Pulls every D1 team from ESPN's standings page (which also gives conference + record),
-then scrapes each team's roster + season stats pages, and upserts one row per player
-into the Supabase `players` table. Scouting `reports` are a separate table this script
+Pulls every D1 team (and its conference) from ESPN's standings feed for ROSTER_SEASON and
+scrapes each one's roster page - that's who's in the database and at what school. Then
+scrapes every STATS_SEASON team's stats page and attaches each player's line to him by ESPN
+ID, wherever he played it. Upserts one row per rostered player into the Supabase `players`
+table. Scouting `reports` are a separate table this script
 never touches, so daily stat refreshes never disturb submitted scouting reports.
 
 Fetches go through a real headless Chromium browser (Playwright), not a plain HTTP
@@ -34,7 +36,7 @@ Advanced metrics (ORB%, DRB%, STL%, BLK%, FT Rate) need team and *opponent* seas
 which no ESPN page or endpoint exposes directly. So every completed game's box score (both
 teams' lines plus every player's line, from the same curl-friendly JSON API as career
 history) is cached in the game_team_stats / game_player_stats tables - a game is only ever
-fetched once - and season totals are summed from that cache on each run. ADVANCED_SEASON
+fetched once - and season totals are summed from that cache on each run. STATS_SEASON
 pins which season this covers.
 
 Env vars required:
@@ -63,19 +65,24 @@ from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 from supabase import create_client
 
-STANDINGS_URL = "https://www.espn.com/mens-college-basketball/standings"
 ROSTER_URL = "https://www.espn.com/mens-college-basketball/team/roster/_/id/{team_id}"
-STATS_URL = "https://www.espn.com/mens-college-basketball/team/stats/_/id/{team_id}"
+# Pinned to STATS_SEASON: without the season the page follows ESPN's current season, and
+# would flip to 2026-27 the day games start.
+STATS_URL = "https://www.espn.com/mens-college-basketball/team/stats/_/id/{team_id}/season/{season}"
 
 CAREER_STATS_URL = (
     "https://site.web.api.espn.com/apis/common/v3/sports/basketball/mens-college-basketball"
     "/athletes/{espn_id}/stats"
 )
 
-# Season the advanced metrics are computed for, as ESPN's end year (2026 = 2025-26). ESPN
-# has rolled its site over to the 2026-27 preseason, but rosters are still last year's, so
-# this stays pinned to 2025-26 until the new rosters are in - then bump to 2027.
-ADVANCED_SEASON = 2026
+# Seasons, as ESPN's end year (2027 = 2026-27). Who's on D1 and where - the team list,
+# conferences and rosters - is ROSTER_SEASON. The stats - per-game stats pages, box scores /
+# advanced metrics, team records - are STATS_SEASON, attached to each player by his ESPN ID
+# wherever he played that season (stats_school records it when that's not his current
+# school). Stats stay on 2025-26 until the user says to switch, even once games start, so
+# every player's numbers come from the same season; then bump STATS_SEASON to 2027.
+ROSTER_SEASON = 2027
+STATS_SEASON = 2026
 
 SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball"
@@ -218,50 +225,28 @@ def _num(v):
         return None
 
 
-def get_teams(page):
-    """Returns a list of dicts: {team_id, name, conference, record}."""
-    html = fetch_html(page, STANDINGS_URL)
-    soup = BeautifulSoup(html, "html.parser")
-
-    conf_names = [t.get_text(strip=True) for t in soup.select("div.Table__Title")]
-    tables = soup.find_all("table")
-
-    teams = []
-    for i, conf_name in enumerate(conf_names):
-        names_table = tables[2 * i] if 2 * i < len(tables) else None
-        stats_table = tables[2 * i + 1] if 2 * i + 1 < len(tables) else None
-        if names_table is None or stats_table is None:
-            continue
-
-        team_entries = []
-        for tr in names_table.find_all("tr"):
-            link = tr.select_one("span.hide-mobile a") or tr.select_one("a.AnchorLink")
-            if not link:
-                continue
-            href = link.get("href", "")
-            m = re.search(r"/id/(\d+)/", href)
-            if not m:
-                continue
-            team_entries.append((m.group(1), link.get_text(strip=True)))
-
-        stat_rows = stats_table.find_all("tr")
-        # First 2 rows are grouped/sub headers ("Conference/Overall/Polls", "W-L/GB/PCT/...").
-        data_rows = stat_rows[2:]
-
-        n = min(len(team_entries), len(data_rows))
-        for j in range(n):
-            team_id, name = team_entries[j]
-            cells = [c.get_text(strip=True) for c in data_rows[j].find_all(["td", "th"])]
-            record = cells[3] if len(cells) > 3 else ""  # "Overall W-L" column
-            teams.append(
-                {
-                    "team_id": team_id,
-                    "name": name,
-                    "conference": conf_name,
-                    "record": record,
-                }
-            )
-    return teams
+def get_teams(season, record_season=None):
+    """Every D1 team in `season`: [{team_id, name, conference, record}], from ESPN's standings
+    feed. `name` is the school without the mascot (ESPN's `location`, e.g. "Duke", "Miami
+    (OH)" - unique across D1). `record` is the overall W-L in `record_season` (default
+    `season`), blank for a team that wasn't D1 then."""
+    records = {
+        str(team["id"]): next(
+            (s.get("displayValue") or s.get("summary") for s in entry.get("stats", [])
+             if s.get("name") == "overall"),
+            "",
+        )
+        for _, team, entry in _standings_entries(record_season or season)
+    }
+    return [
+        {
+            "team_id": str(team["id"]),
+            "name": team.get("location") or team.get("displayName"),
+            "conference": conf,
+            "record": records.get(str(team["id"]), ""),
+        }
+        for conf, team, _ in _standings_entries(season)
+    ]
 
 
 def strip_jersey_number(raw_name):
@@ -331,7 +316,7 @@ def scrape_stats(page, team_id):
     that still identifies them at all once that happens.
     """
     info = {}
-    url = STATS_URL.format(team_id=team_id)
+    url = STATS_URL.format(team_id=team_id, season=STATS_SEASON)
     try:
         html = fetch_html(page, url)
         tables = pd.read_html(StringIO(html))
@@ -569,10 +554,10 @@ PLAYER_BOX_KEYS = (
 
 
 def _standings_entries(season):
-    """(conference name, ESPN team dict) for every D1 team in `season`."""
+    """(conference name, ESPN team dict, standings entry) for every D1 team in `season`."""
     data = curl_get_json(STANDINGS_API_URL.format(season=season))
     return [
-        (conf.get("name"), e["team"])
+        (conf.get("name"), e["team"], e)
         for conf in data.get("children", [])
         for e in conf.get("standings", {}).get("entries", [])
     ]
@@ -580,17 +565,7 @@ def _standings_entries(season):
 
 def get_conferences(season):
     """{espn_team_id: conference name} for every D1 team in `season`."""
-    return {str(team["id"]): conf for conf, team in _standings_entries(season)}
-
-
-def get_school_names(season):
-    """{espn_team_id: school name without the mascot} - ESPN's `location`, e.g. "Duke" for
-    "Duke Blue Devils", "Miami (OH)" for "Miami (OH) RedHawks". Unique across D1."""
-    return {
-        str(team["id"]): team["location"]
-        for _, team in _standings_entries(season)
-        if team.get("location")
-    }
+    return {str(team["id"]): conf for conf, team, _ in _standings_entries(season)}
 
 
 def compute_player_stats(
@@ -774,89 +749,83 @@ def player_id_for(espn_player_id, name, team_name):
     return f"{slugify(name)}-{slugify(team_name)}"
 
 
-def scrape_team(page, team):
-    """Returns one candidate row per name found on this team's roster and/or stats page.
-    The same player can come back from more than one team (see merge_player_rows)."""
-    team_id, team_name, conference, record = (
-        team["team_id"],
-        team["name"],
-        team["conference"],
-        team["record"],
-    )
-    roster = scrape_roster(page, team_id)
-    stats = scrape_stats(page, team_id)
-
-    all_names = set(roster.keys()) | set(stats.keys())
+def scrape_team_roster(page, team):
+    """One row per player on this team's ROSTER_SEASON roster page. Stats are attached
+    afterwards (merge_player_rows), since they may come from another team's page."""
     now = datetime.now(timezone.utc).isoformat()
+    return [
+        {
+            "player_id": player_id_for(info["espn_player_id"], name, team["name"]),
+            "name": name,
+            "school": team["name"],
+            "conference": team["conference"],
+            "position": info["position"],
+            "class": info["class"],
+            "height": info["height"],
+            "weight": info["weight"],
+            "record": team["record"],
+            "espn_player_id": info["espn_player_id"],
+            "last_updated": now,
+        }
+        for name, info in scrape_roster(page, team["team_id"]).items()
+    ]
 
-    rows = []
-    for name in all_names:
-        r_info = roster.get(name, {})
-        s_info = stats.get(name, {})
-        espn_player_id = r_info.get("espn_player_id") or s_info.get("espn_player_id")
-        rows.append(
-            {
-                "player_id": player_id_for(espn_player_id, name, team_name),
-                "name": name,
-                "school": team_name,
-                "conference": conference,
-                "position": r_info.get("position") or s_info.get("position"),
-                "class": r_info.get("class"),
-                "height": r_info.get("height"),
-                "weight": r_info.get("weight"),
-                "record": record,
-                "espn_player_id": espn_player_id,
-                "gp": s_info.get("gp"),
-                "min": s_info.get("min"),
-                "ppg": s_info.get("ppg"),
-                "rpg": s_info.get("rpg"),
-                "apg": s_info.get("apg"),
-                "spg": s_info.get("spg"),
-                "bpg": s_info.get("bpg"),
-                "topg": s_info.get("topg"),
-                "fg_pct": s_info.get("fg_pct"),
-                "three_pct": s_info.get("three_pct"),
-                "ft_pct": s_info.get("ft_pct"),
-                "last_updated": now,
-                "_on_stats_page": bool(s_info),
-            }
-        )
-    return rows
+
+def scrape_team_stats(page, team):
+    """This team's STATS_SEASON stat lines, each tagged with its name and school."""
+    return [
+        {**line, "name": name, "school": team["name"]}
+        for name, line in scrape_stats(page, team["team_id"]).items()
+    ]
 
 
 ROSTER_FIELDS = ("position", "class", "height", "weight")
+STAT_FIELDS = tuple(STAT_COLUMN_MAP.values())
 
 
-def merge_player_rows(candidates):
-    """Collapses candidate rows to one per player_id.
+def merge_player_rows(roster_rows, stat_lines):
+    """One row per rostered player, with his STATS_SEASON stat line attached.
 
-    During the offseason ESPN rolls team rosters over to next season one team at a time,
-    while every team's stats page stays on last season until games start. So a transfer
-    shows up on his new team's roster (no stats) *and* his old team's stats page, and a
-    player ESPN renamed shows up under both names on one team. Both share an ESPN ID.
+    Lines are matched by ESPN ID, so a transfer's stats follow him to his new school
+    (stats_school then says where they're from) and a player ESPN renamed still matches
+    under his old name; a player with no ESPN ID is matched by name at the same school. If
+    he's on more than one stats page (a mid-season transfer), the line with the most
+    minutes wins. A player listed twice on rosters is collapsed to one row, with any
+    missing roster fields (class, height...) filled in from the other.
 
-    The row from a stats page wins - that's the school the season's stats are from - and
-    any roster fields it's missing (class, height...) are filled in from the other rows.
-    If he's on more than one stats page (a mid-season transfer), the one where he played
-    the most minutes wins.
+    Stat lines with no rostered player - graduated, gone pro, left D1 - are dropped; those
+    players' old rows age out through prune_stale_players.
     """
+    def line_key(espn_player_id, name, school):
+        return espn_player_id or (slugify(name), school)
+
+    def weight(line):
+        return (line.get("gp") or 0) * (line.get("min") or 0)
+
+    lines = {}
+    for line in stat_lines:
+        key = line_key(line["espn_player_id"], line["name"], line["school"])
+        if key not in lines or weight(line) > weight(lines[key]):
+            lines[key] = line
+
     by_id = defaultdict(list)
-    for row in candidates:
+    for row in roster_rows:
         by_id[row["player_id"]].append(row)
 
     merged = []
     for rows in by_id.values():
-        rows.sort(
-            key=lambda r: (r["_on_stats_page"], (r["gp"] or 0) * (r["min"] or 0)),
-            reverse=True,
-        )
-        best = dict(rows[0])
+        row = dict(rows[0])
         for other in rows[1:]:
             for field in ROSTER_FIELDS:
-                if not best.get(field) and other.get(field):
-                    best[field] = other[field]
-        del best["_on_stats_page"]
-        merged.append(best)
+                if not row.get(field) and other.get(field):
+                    row[field] = other[field]
+        line = lines.get(line_key(row["espn_player_id"], row["name"], row["school"]))
+        for field in STAT_FIELDS:
+            row[field] = line.get(field) if line else None
+        if line and not row.get("position"):
+            row["position"] = line.get("position")
+        row["stats_school"] = line["school"] if line and line["school"] != row["school"] else None
+        merged.append(row)
     return merged
 
 
@@ -986,9 +955,9 @@ def main():
 
     client = create_client(supabase_url, supabase_key)
 
-    print(f"Updating box score cache + advanced metrics for season {ADVANCED_SEASON}...")
+    print(f"Updating box score cache + advanced metrics for season {STATS_SEASON}...")
     try:
-        advanced = get_advanced_stats(client, ADVANCED_SEASON)
+        advanced = get_advanced_stats(client, STATS_SEASON)
         print(
             f"Computed advanced metrics for {len(advanced['all'])} players "
             f"({len(advanced['vs_hm'])} with games vs high/mid majors)."
@@ -996,6 +965,29 @@ def main():
     except Exception as e:
         advanced = None
         print(f"Advanced metrics failed, keeping existing values this run: {e}")
+
+    # Plain JSON (no WAF challenge), so this happens before the browser starts.
+    print(f"Fetching D1 teams: {ROSTER_SEASON} rosters, {STATS_SEASON} stats...")
+    roster_teams = get_teams(ROSTER_SEASON, record_season=STATS_SEASON)
+    stats_teams = get_teams(STATS_SEASON)
+    print(f"{len(roster_teams)} {ROSTER_SEASON} teams, {len(stats_teams)} {STATS_SEASON} teams.")
+
+    team_limit = os.environ.get("TEAM_LIMIT", "").strip()
+    if team_limit:
+        roster_teams = roster_teams[: int(team_limit)]
+        ids = {t["team_id"] for t in roster_teams}
+        stats_teams = [t for t in stats_teams if t["team_id"] in ids]
+        print(f"TEAM_LIMIT set, only scraping the first {len(roster_teams)} teams.")
+
+    include_career_stats = os.environ.get("INCLUDE_CAREER_STATS", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if include_career_stats:
+        print("INCLUDE_CAREER_STATS set - also fetching career history (slower).")
+    else:
+        print("Skipping career history this run (INCLUDE_CAREER_STATS not set).")
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -1006,44 +998,29 @@ def main():
             )
         )
 
-        print("Fetching D1 team list from ESPN standings...")
-        teams = get_teams(page)
-        print(f"Found {len(teams)} teams.")
-        try:
-            school_names = get_school_names(ADVANCED_SEASON)
-        except Exception as e:
-            school_names = {}
-            print(f"Couldn't fetch mascot-free school names, keeping ESPN's full names: {e}")
-        for team in teams:
-            team["name"] = school_names.get(team["team_id"], team["name"])
+        roster_rows = []
+        for i, team in enumerate(roster_teams, start=1):
+            print(f"[roster {i}/{len(roster_teams)}] {team['name']} ({team['conference']})")
+            roster_rows.extend(scrape_team_roster(page, team))
+            time.sleep(SLEEP_BETWEEN_TEAMS)
 
-        team_limit = os.environ.get("TEAM_LIMIT", "").strip()
-        if team_limit:
-            teams = teams[: int(team_limit)]
-            print(f"TEAM_LIMIT set, only scraping first {len(teams)} teams.")
-
-        include_career_stats = os.environ.get("INCLUDE_CAREER_STATS", "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        if include_career_stats:
-            print("INCLUDE_CAREER_STATS set - also fetching career history (slower).")
-        else:
-            print("Skipping career history this run (INCLUDE_CAREER_STATS not set).")
-
-        candidates = []
-        for i, team in enumerate(teams, start=1):
-            print(f"[{i}/{len(teams)}] {team['name']} ({team['conference']})")
-            candidates.extend(scrape_team(page, team))
+        stat_lines = []
+        for i, team in enumerate(stats_teams, start=1):
+            print(f"[stats {i}/{len(stats_teams)}] {team['name']}")
+            stat_lines.extend(scrape_team_stats(page, team))
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         browser.close()
 
-    # Everything's collected before anything's written, since one player can come back from
-    # two teams (see merge_player_rows) and only the full set can say which row wins.
-    rows = merge_player_rows(candidates)
-    print(f"\nMerged {len(candidates)} roster/stats entries into {len(rows)} players.")
+    # Everything's collected before anything's written: a player's stats can be on another
+    # team's page than his roster (see merge_player_rows).
+    rows = merge_player_rows(roster_rows, stat_lines)
+    with_stats = sum(1 for r in rows if r["gp"] is not None)
+    moved = sum(1 for r in rows if r["stats_school"])
+    print(
+        f"\n{len(roster_rows)} roster entries -> {len(rows)} players; {with_stats} with "
+        f"{STATS_SEASON} stats ({moved} from another school), from {len(stat_lines)} stat lines."
+    )
     split_rows = attach_advanced(rows, advanced)
     upsert_players(client, rows)
     if advanced is not None:
@@ -1054,7 +1031,7 @@ def main():
         pruned = prune_stale_players(client, {r["player_id"] for r in rows})
         print(f"Pruned {pruned} players not seen on ESPN in {STALE_AFTER_DAYS}+ days.")
 
-    print(f"Done. Upserted stats for {len(rows)} players across {len(teams)} teams.")
+    print(f"Done. Upserted {len(rows)} players across {len(roster_teams)} teams.")
 
 
 if __name__ == "__main__":
