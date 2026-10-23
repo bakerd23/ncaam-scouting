@@ -108,18 +108,11 @@
       return hmSplitsPromise;
     }
     let hmOnly = false;
-    // "D1" or "JUCO". Remembered per browser so a scout working JUCO stays there.
+    // "D1", "JUCO" or "ADDED". Always opens on D1.
     let level = "D1";
-    try {
-      const saved = localStorage.getItem("playerLevel");
-      if (saved === "JUCO" || saved === "ADDED") level = saved;
-    } catch (e) {}
 
     function setLevel(next) {
       level = next;
-      try {
-        localStorage.setItem("playerLevel", level);
-      } catch (e) {}
       document.body.classList.toggle("juco-mode", level === "JUCO");
       document.body.classList.toggle("added-mode", level === "ADDED");
       document.querySelectorAll(".level-toggle button").forEach((b) => {
