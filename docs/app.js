@@ -97,6 +97,105 @@ async function fetchReports(playerId) {
   return data || [];
 }
 
+// A report still waiting in this device's offline outbox is read/edited right there, since
+// it isn't in the database yet.
+async function fetchReport(id) {
+  const queued = readOutbox().find((x) => x.report.id === id);
+  if (queued) return queued.report;
+  const { data, error } = await supabaseClient.from("reports").select("*").eq("id", id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function updateReport(id, fields) {
+  if (readOutbox().some((x) => x.report.id === id)) {
+    writeOutbox(readOutbox().map((x) => (x.report.id === id ? { ...x, report: { ...x.report, ...fields } } : x)));
+    return;
+  }
+  const { data, error } = await supabaseClient.from("reports").update(fields).eq("id", id).select("id");
+  if (error) throw error;
+  // RLS hides a blocked update as "0 rows changed" rather than an error.
+  if (!data || data.length === 0) throw new Error("the database didn't accept the edit (report missing, or editing not allowed)");
+}
+
+// ---------- Player flags ----------
+// Nelson's own colored flags (flag_types: label + color he picks) and which one each player
+// has (player_flags, at most one per player). See "Player flags" in schema.sql.
+async function fetchFlagTypes() {
+  const { data, error } = await supabaseClient.from("flag_types").select("*").order("created_at", { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// player_id -> flag_id, for every flagged player.
+async function fetchPlayerFlags() {
+  const rows = await fetchAllPages((opts) =>
+    supabaseClient.from("player_flags").select("player_id, flag_id", opts).order("player_id", { ascending: true })
+  );
+  return Object.fromEntries(rows.map((r) => [r.player_id, r.flag_id]));
+}
+
+async function fetchPlayerFlag(playerId) {
+  const { data, error } = await supabaseClient.from("player_flags").select("flag_id").eq("player_id", playerId).maybeSingle();
+  if (error) throw error;
+  return data ? data.flag_id : null;
+}
+
+// flagId null clears the player's flag.
+async function setPlayerFlag(playerId, flagId) {
+  const { error } = flagId
+    ? await supabaseClient
+        .from("player_flags")
+        .upsert({ player_id: playerId, flag_id: flagId, updated_at: new Date().toISOString() })
+    : await supabaseClient.from("player_flags").delete().eq("player_id", playerId);
+  if (error) throw error;
+}
+
+async function saveFlagType(flag) {
+  const { label, color } = flag;
+  const { data, error } = flag.id
+    ? await supabaseClient.from("flag_types").update({ label, color }).eq("id", flag.id).select().single()
+    : await supabaseClient.from("flag_types").insert({ label, color }).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Also clears it from every player that had it (on delete cascade).
+async function deleteFlagType(id) {
+  const { error } = await supabaseClient.from("flag_types").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// The flag changes made in this browser in the last couple of minutes, so the Players list
+// shows them right away even if what it reads is a step behind (it went back before the save
+// finished, a saved offline copy, another tab). The database stays the record; these just
+// cover the gap. player_id -> { flagId, at }.
+const FLAG_EDITS_KEY = "recentFlagEdits";
+const FLAG_EDIT_MS = 2 * 60 * 1000;
+
+function recentFlagEdits() {
+  try {
+    const all = JSON.parse(localStorage.getItem(FLAG_EDITS_KEY) || "{}");
+    const now = Date.now();
+    return Object.fromEntries(Object.entries(all).filter(([, e]) => now - e.at < FLAG_EDIT_MS));
+  } catch (e) {
+    return {};
+  }
+}
+
+function noteFlagEdit(playerId, flagId) {
+  try {
+    const all = recentFlagEdits();
+    all[playerId] = { flagId, at: Date.now() };
+    localStorage.setItem(FLAG_EDITS_KEY, JSON.stringify(all));
+  } catch (e) {}
+}
+
+function flagDot(flag) {
+  if (!flag) return "";
+  return `<span class="flag-dot" style="background:${escapeHtml(flag.color)}" title="${escapeHtml(flag.label)}"></span>`;
+}
+
 async function fetchCareerStats(playerId) {
   const { data, error } = await supabaseClient
     .from("career_stats")
@@ -384,3 +483,13 @@ function escapeHtml(s) {
 
 renderOutboxBanner();
 flushOutbox();
+
+// Saves the site on the device so it opens with no signal later (see sw.js).
+if ("serviceWorker" in navigator) {
+  // First visit: this page's data loaded before the service worker existed, so once it takes
+  // over, fetch the player list again through it - that's what the report form needs offline.
+  if (!navigator.serviceWorker.controller) {
+    navigator.serviceWorker.addEventListener("controllerchange", () => fetchAllPlayers().catch(() => {}), { once: true });
+  }
+  navigator.serviceWorker.register("sw.js").catch((err) => console.warn("Offline copy unavailable:", err));
+}

@@ -85,6 +85,16 @@
         : currentPlayer.gp === null || currentPlayer.gp === undefined
         ? '<p class="player-meta">No 2025-26 NJCAA stats on file (incoming player).</p>'
         : `<p class="player-meta">2025-26 NJCAA stats${currentPlayer.stats_school ? ` at ${escapeHtml(currentPlayer.stats_school)}` : ""}.</p>`;
+      // D1 rosters are 2026-27 but stats stay 2025-26 - say so when they're from another school
+      // (a transfer) or there are none (freshman, or new to D1).
+      const d1Note =
+        playerLevel(currentPlayer) !== "D1"
+        ? ""
+        : currentPlayer.gp === null || currentPlayer.gp === undefined
+        ? '<p class="player-meta">No 2025-26 D1 stats on file (freshman or new to D1).</p>'
+        : currentPlayer.stats_school
+        ? `<p class="player-meta">2025-26 stats at ${escapeHtml(currentPlayer.stats_school)}.</p>`
+        : "";
       const note =
         isJuco
         ? jucoNote
@@ -92,7 +102,7 @@
           ? '<p class="player-meta">No games vs High/Mid Major opponents on record.</p>'
           : hmOnly
           ? '<p class="player-meta">Games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents only (2025-26).</p>'
-          : "";
+          : d1Note;
       document.getElementById("stats-section").innerHTML = `
           ${note}
           <div class="stat-grid">
@@ -167,7 +177,7 @@
         ? [p.school, `NJCAA ${p.juco_division || ""}`.trim(), p.conference].filter(Boolean).map(escapeHtml).join(" &middot; ")
         : isAdded
         ? [p.school, p.added_level].filter(Boolean).map(escapeHtml).join(" &middot; ")
-        : `${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; Record: ${escapeHtml(p.record || "—")}`;
+        : `${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; 2025-26 Record: ${escapeHtml(p.record || "—")}`;
       const addedNote = isAdded
         ? `<p class="player-meta" style="margin-top:10px;">Added by ${escapeHtml(p.added_by || "a scout")} &middot; not on an ESPN or NJCAA roster, so no stats on file.</p>`
         : "";
@@ -182,6 +192,7 @@
           <div class="player-meta" style="margin-top:6px;">${schoolLine}</div>
           ${origin ? `<div class="player-meta" style="margin-top:2px;">${origin}</div>` : ""}
           ${addedNote}
+          <div id="flag-bar" class="flag-bar"></div>
           <div class="d1-only" style="margin-top:14px;">
             <button class="btn secondary" id="hm-toggle" type="button" aria-pressed="false">vs High/Mid Major Only</button>
           </div>
@@ -199,6 +210,210 @@
       `;
       document.getElementById("hm-toggle").addEventListener("click", toggleHm);
       renderStats();
+      renderFlagBar();
+    }
+
+    // ---------- Flags ----------
+    let flagTypes = null; // null = couldn't load (offline with no saved copy) - bar stays hidden
+    let playerFlagId = null;
+    let flagForm = null; // { id?, label, color } while adding/editing a color
+    let editingFlags = false;
+    // The colors a flag can be - tap-friendly swatches instead of a color wheel, picked to stay
+    // distinct from each other on the dark background.
+    const FLAG_COLORS = [
+      ["#e53935", "Red"], ["#fb8c00", "Orange"], ["#fdd835", "Yellow"], ["#7cb342", "Light green"],
+      ["#1b8a3a", "Dark green"], ["#00897b", "Teal"], ["#26c6da", "Cyan"], ["#1e88e5", "Blue"],
+      ["#3f51b5", "Indigo"], ["#9c27b0", "Purple"], ["#f06292", "Pink"], ["#8d6e63", "Brown"],
+      ["#9e9e9e", "Gray"], ["#ffffff", "White"],
+    ];
+
+    function swatchesHtml(selected) {
+      const used = Object.fromEntries(flagTypes.filter((f) => f.id !== flagForm.id).map((f) => [f.color.toLowerCase(), f.label]));
+      const colors = [...FLAG_COLORS];
+      // A flag saved with a color that's no longer in the list keeps it as an option.
+      if (!colors.some(([c]) => c === selected.toLowerCase())) colors.push([selected, "Current color"]);
+      return colors
+        .map(([c, name]) => {
+          const usedBy = used[c.toLowerCase()];
+          const label = usedBy ? `${name} (used for ${usedBy})` : name;
+          return `<button type="button" class="swatch${usedBy ? " used" : ""}" role="radio" data-color="${c}"
+            aria-checked="${c.toLowerCase() === selected.toLowerCase()}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}"
+            style="--swatch:${c}"></button>`;
+        })
+        .join("");
+    }
+
+    // Closed (normal): just this player's flag, or a "Flag player" button if he has none - so
+    // removing it really makes it go away. Open: every color, to pick one, add or edit colors.
+    let pickerOpen = false;
+
+    function renderFlagBar() {
+      const bar = document.getElementById("flag-bar");
+      if (!bar || !flagTypes) return;
+      const current = flagTypes.find((f) => f.id === playerFlagId);
+      if (!pickerOpen && !editingFlags && !flagForm) {
+        bar.innerHTML = current
+          ? `<span class="field-label">Flag</span>
+             <span class="flag-chip current" style="--flag:${escapeHtml(current.color)}">${flagDot(current)}${escapeHtml(current.label)}</span>
+             <button type="button" class="flag-chip" id="flag-open">Change</button>
+             <button type="button" class="flag-chip clear" id="flag-clear" title="Unflag this player only - the color stays">&#10005; Remove flag</button>
+             <div id="flag-msg"></div>`
+          : `<span class="field-label">Flag</span>
+             <button type="button" class="flag-chip add" id="flag-open">+ Flag player</button>
+             <div id="flag-msg"></div>`;
+        document.getElementById("flag-open").addEventListener("click", () => {
+          pickerOpen = true;
+          renderFlagBar();
+        });
+        const clear = document.getElementById("flag-clear");
+        if (clear) clear.addEventListener("click", () => chooseFlag(null));
+        return;
+      }
+
+      const chips = flagTypes
+        .map(
+          (f) => `<button type="button" class="flag-chip" data-flag-id="${escapeHtml(f.id)}"
+            aria-pressed="${f.id === playerFlagId}" style="--flag:${escapeHtml(f.color)}">${flagDot(f)}${escapeHtml(f.label)}${editingFlags ? " &#9998;" : ""}</button>`
+        )
+        .join("");
+      const form = !flagForm
+        ? ""
+        : `<div class="flag-form">
+            <div class="swatches" role="radiogroup" aria-label="Color">${swatchesHtml(flagForm.color)}</div>
+            <input type="text" id="flag-label" value="${escapeHtml(flagForm.label)}" placeholder="What does it mean? e.g. Target" maxlength="40" />
+            <button type="button" class="btn" id="flag-save">${flagForm.id ? "Save" : "Add"}</button>
+            <button type="button" class="btn secondary" id="flag-cancel">Cancel</button>
+            ${flagForm.id ? '<button type="button" class="btn secondary danger" id="flag-delete">Delete this color for all players</button>' : ""}
+          </div>`;
+      bar.innerHTML = `
+        <span class="field-label">Flag</span>
+        ${chips}
+        ${editingFlags ? "" : '<button type="button" class="flag-chip add" id="flag-add">+ Add color</button>'}
+        ${flagTypes.length || flagForm ? "" : '<span class="flag-hint">Make a color to flag players with (e.g. Target, Watch) and filter by it on the Players page.</span>'}
+        ${flagTypes.length ? `<a href="#" id="flag-edit-toggle">${editingFlags ? "Done editing" : "Edit colors"}</a>` : ""}
+        <a href="#" id="flag-close">Close</a>
+        ${form}
+        <div id="flag-msg"></div>`;
+
+      bar.querySelectorAll("button[data-flag-id]").forEach((b) =>
+        b.addEventListener("click", () => {
+          const f = flagTypes.find((x) => x.id === b.dataset.flagId);
+          if (editingFlags) {
+            flagForm = { ...f };
+            renderFlagBar();
+          } else {
+            pickerOpen = false; // picked - back to just showing his flag
+            chooseFlag(f.id);
+          }
+        })
+      );
+      document.getElementById("flag-close").addEventListener("click", (e) => {
+        e.preventDefault();
+        pickerOpen = editingFlags = false;
+        flagForm = null;
+        renderFlagBar();
+      });
+      const add = document.getElementById("flag-add");
+      if (add)
+        add.addEventListener("click", () => {
+          // Start on the first color nobody's using yet.
+          const used = new Set(flagTypes.map((f) => f.color.toLowerCase()));
+          flagForm = { label: "", color: (FLAG_COLORS.find(([c]) => !used.has(c)) || FLAG_COLORS[0])[0] };
+          renderFlagBar();
+          document.getElementById("flag-label").focus();
+        });
+      const toggle = document.getElementById("flag-edit-toggle");
+      if (toggle)
+        toggle.addEventListener("click", (e) => {
+          e.preventDefault();
+          editingFlags = !editingFlags;
+          flagForm = null;
+          renderFlagBar();
+        });
+      if (flagForm) {
+        // Picking a color just moves the check, so whatever's typed in the name box stays.
+        bar.querySelectorAll(".swatch").forEach((s) =>
+          s.addEventListener("click", () => {
+            flagForm.color = s.dataset.color;
+            bar.querySelectorAll(".swatch").forEach((x) => x.setAttribute("aria-checked", String(x === s)));
+          })
+        );
+        document.getElementById("flag-save").addEventListener("click", saveFlagForm);
+        document.getElementById("flag-label").addEventListener("keydown", (e) => {
+          if (e.key === "Enter") saveFlagForm();
+        });
+        document.getElementById("flag-cancel").addEventListener("click", () => {
+          flagForm = null;
+          renderFlagBar();
+        });
+        const del = document.getElementById("flag-delete");
+        if (del) del.addEventListener("click", deleteFlagForm);
+      }
+    }
+
+    function flagError(err) {
+      console.error(err);
+      document.getElementById("flag-msg").innerHTML = `<div class="msg error">${
+        isNetworkError(err) ? "No connection - flags can only be changed online." : "Couldn't save: " + escapeHtml(err.message)
+      }</div>`;
+    }
+
+    async function chooseFlag(flagId) {
+      const before = playerFlagId;
+      playerFlagId = flagId; // show it right away, undo if the save fails
+      renderFlagBar();
+      noteFlagEdit(currentPlayer.player_id, flagId); // so the Players list shows it immediately
+      try {
+        await setPlayerFlag(currentPlayer.player_id, flagId);
+      } catch (err) {
+        noteFlagEdit(currentPlayer.player_id, before);
+        playerFlagId = before;
+        renderFlagBar();
+        flagError(err);
+      }
+    }
+
+    async function saveFlagForm() {
+      const label = document.getElementById("flag-label").value.trim();
+      const color = flagForm.color;
+      if (!label) {
+        document.getElementById("flag-msg").innerHTML = '<div class="msg error">Give the color a name so it\'s clear what it means.</div>';
+        return;
+      }
+      try {
+        const saved = await saveFlagType({ id: flagForm.id, label, color });
+        const isNew = !flagForm.id;
+        flagTypes = isNew ? [...flagTypes, saved] : flagTypes.map((f) => (f.id === saved.id ? saved : f));
+        flagForm = null;
+        if (isNew) {
+          pickerOpen = false;
+          chooseFlag(saved.id); // adding a color from a player's page flags him with it
+        } else {
+          renderFlagBar();
+        }
+      } catch (err) {
+        flagError(err);
+      }
+    }
+
+    async function deleteFlagForm() {
+      if (
+        !confirm(
+          `Delete the color "${flagForm.label}" for ALL players? Everyone flagged with it loses the flag.\n\n` +
+            `To unflag just this player, cancel and use "Remove flag" instead.`
+        )
+      )
+        return;
+      try {
+        await deleteFlagType(flagForm.id);
+        flagTypes = flagTypes.filter((f) => f.id !== flagForm.id);
+        if (playerFlagId === flagForm.id) playerFlagId = null;
+        flagForm = null;
+        if (!flagTypes.length) editingFlags = false;
+        renderFlagBar();
+      } catch (err) {
+        flagError(err);
+      }
     }
 
     function renderReportCard(r) {
@@ -210,8 +425,12 @@
         <div class="report-card">
           <div class="report-head">
             <span><strong>${escapeHtml(r.scout_name)}</strong> &middot; ${escapeHtml(r.date_watched)}${r.context ? " &middot; " + escapeHtml(r.context) : ""}</span>
-            ${r.overall_grade !== null && r.overall_grade !== undefined ? `<span class="grade-pill">${escapeHtml(r.overall_grade)}/10</span>` : ""}
+            <span>
+              ${r.overall_grade !== null && r.overall_grade !== undefined ? `<span class="grade-pill">${escapeHtml(r.overall_grade)}/10</span>` : ""}
+              <a class="btn secondary edit-btn" href="report.html?edit=${encodeURIComponent(r.id)}">Edit</a>
+            </span>
           </div>
+          ${r.updated_at ? `<div class="player-meta">Edited ${escapeHtml(new Date(r.updated_at).toLocaleString())}</div>` : ""}
           ${field("Parents", r.parents)}
           ${field("AAU Coach", r.aau_coach)}
           ${field("Agent", r.agent)}
@@ -240,10 +459,15 @@
       try {
         const session = await getSession();
         const canViewReports = !!session || !window.REQUIRE_LOGIN_FOR_REPORTS;
-        const [player, reports, career] = await Promise.all([
+        // Flags are extra - if they can't load (offline with no saved copy) the page still works.
+        const noFlags = (err) => (console.error(err), null);
+        let player, reports, career;
+        [player, reports, career, flagTypes, playerFlagId] = await Promise.all([
           fetchPlayer(id),
           canViewReports ? fetchReports(id) : Promise.resolve([]),
           fetchCareerStats(id),
+          fetchFlagTypes().catch(noFlags),
+          fetchPlayerFlag(id).catch(noFlags),
         ]);
         if (!player) {
           content.innerHTML = '<p class="status-line">Player not found.</p>';

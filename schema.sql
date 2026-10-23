@@ -282,7 +282,69 @@ create policy "scouts can add unlisted players" on players
   );
 
 -- Otherwise no insert/update/delete policy on `players` or `career_stats` for the public
--- (anon) role, and no update/delete policy on `reports` either. Both `players` and
+-- (anon) role, and no delete policy on `reports` either. Both `players` and
 -- `career_stats` are written only by the daily scrapers using the service_role key, which
 -- bypasses RLS entirely. Scouts can only ever add new reports (and scout-added players),
--- never edit or delete existing ones (or any player/career data) from the public site.
+-- never delete existing ones (or edit any player/career data) from the public site -
+-- except editing reports, which the "Report editing" section below allows (DEMO MODE).
+
+-- ---------- Report editing (2026-10) ----------
+
+alter table reports add column if not exists updated_at timestamptz;
+
+-- Stamped by the database on every edit (not trusted from the page).
+create or replace function touch_report_updated_at() returns trigger
+language plpgsql as $$
+begin
+  new.updated_at := now();
+  return new;
+end $$;
+
+drop trigger if exists reports_touch_updated_at on reports;
+create trigger reports_touch_updated_at before update on reports
+  for each row execute function touch_report_updated_at();
+
+-- DEMO MODE (current live state, while Nelson is the only user): anyone with the link can
+-- edit any report, same as the public read policy. Goes away with the LOCKDOWN step once
+-- scout logins exist - see the LOCKDOWN note on the reports policies in schema.sql.
+drop policy if exists "reports editable by anyone" on reports;
+drop policy if exists "reports editable by authenticated users" on reports;
+create policy "reports editable by anyone" on reports
+  for update using (true) with check (true);
+
+-- LOCKDOWN MODE (not yet applied): only signed-in accounts may edit.
+--   drop policy if exists "reports editable by anyone" on reports;
+--   create policy "reports editable by authenticated users" on reports
+--     for update using (auth.role() = 'authenticated') with check (auth.role() = 'authenticated');
+
+-- ---------- Player flags (2026-10) ----------
+
+create table if not exists flag_types (
+  id uuid primary key default gen_random_uuid(),
+  label text not null,
+  color text not null check (color ~ '^#[0-9a-fA-F]{6}$'),
+  created_at timestamptz default now()
+);
+
+-- No foreign key to players on purpose: a player whose row is replaced (e.g. at the season
+-- rollover) shouldn't silently lose his flag - an orphaned flag just doesn't show, and can be
+-- moved to the new player_id.
+create table if not exists player_flags (
+  player_id text primary key,
+  flag_id uuid not null references flag_types(id) on delete cascade,
+  updated_at timestamptz default now()
+);
+
+alter table flag_types enable row level security;
+alter table player_flags enable row level security;
+
+-- DEMO MODE (current live state, while Nelson is the only user): anyone with the link can
+-- read and change flags, like reports. LOCKDOWN (once logins exist): swap "using (true)" /
+-- "with check (true)" for auth.role() = 'authenticated' - or per-user flags, Nelson's call.
+drop policy if exists "flag_types open to anyone" on flag_types;
+create policy "flag_types open to anyone" on flag_types
+  for all using (true) with check (true);
+
+drop policy if exists "player_flags open to anyone" on player_flags;
+create policy "player_flags open to anyone" on player_flags
+  for all using (true) with check (true);

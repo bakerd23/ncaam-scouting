@@ -13,8 +13,8 @@
 
   <main>
     <div class="card form-card">
-      <h1 style="margin-top:0;">Submit a Scouting Report</h1>
-      <p class="player-meta">Watched a player? Fill this out and it'll attach straight to their profile.</p>
+      <h1 style="margin-top:0;" id="form-title">Submit a Scouting Report</h1>
+      <p class="player-meta" id="form-intro">Watched a player? Fill this out and it'll attach straight to their profile. You can come back and edit it later.</p>
 
       <form class="report-form" id="report-form">
         <div class="field">
@@ -141,17 +141,20 @@
   <script>
     let allPlayers = [];
     let selectedPlayer = null;
+    const editingId = qs("edit"); // report.html?edit=<report id> reopens a report to finish it
 
     // ---------- Player search ----------
     function showSelectedPlayer(p) {
       selectedPlayer = p;
       const el = document.getElementById("selected-player");
       el.style.display = "block";
-      el.innerHTML = `Reporting on: <strong>${escapeHtml(p.name)}</strong> (${escapeHtml(p.school)}${levelTag(p)}) &middot; <a href="#" id="clear-player">change</a>`;
+      el.innerHTML = `Reporting on: <strong>${escapeHtml(p.name)}</strong> (${escapeHtml(p.school)}${levelTag(p)})` +
+        (editingId ? "" : ' &middot; <a href="#" id="clear-player">change</a>');
       setAddingPlayer(false);
       document.getElementById("add-player-hint").style.display = "none";
       document.getElementById("player-search").style.display = "none";
       document.getElementById("player-search-results").style.display = "none";
+      if (editingId) return; // the player stays fixed when editing
       document.getElementById("clear-player").addEventListener("click", (e) => {
         e.preventDefault();
         selectedPlayer = null;
@@ -258,6 +261,7 @@
       e.preventDefault();
       const msg = document.getElementById("form-msg");
       msg.innerHTML = "";
+      if (editingId) return saveEdit(msg);
 
       const newPlayer = addingPlayer
         ? {
@@ -314,9 +318,10 @@
         await sendReport(item);
         const added = item.newPlayer;
         if (added) allPlayers.push(added);
+        const editMore = `<a href="report.html?edit=${encodeURIComponent(item.report.id)}">Keep editing it</a>`;
         msg.innerHTML = added
-          ? `<div class="msg success">Report submitted, and <a href="${playerLink(added.player_id)}">${escapeHtml(added.name)}</a> was added to the database (Players &rarr; Added). Thanks!</div>`
-          : '<div class="msg success">Report submitted. Thanks!</div>';
+          ? `<div class="msg success">Report submitted, and <a href="${playerLink(added.player_id)}">${escapeHtml(added.name)}</a> was added to the database (Players &rarr; Added). ${editMore}, or reopen it later from his page.</div>`
+          : `<div class="msg success">Report submitted. ${editMore}, or reopen it later from <a href="${playerLink(item.report.player_id)}">his page</a>.</div>`;
         resetReportForm();
       } catch (err) {
         if (isNetworkError(err)) {
@@ -338,8 +343,70 @@
       }
     });
 
+    // ---------- Edit an existing report ----------
+    function reportFields() {
+      const fields = {
+        scout_name: document.getElementById("scout-name").value.trim(),
+        date_watched: document.getElementById("date-watched").value,
+        context: document.getElementById("context").value.trim() || null,
+      };
+      document.querySelectorAll("#report-form [data-column]").forEach((el) => {
+        fields[el.dataset.column] = el.value.trim() || null;
+      });
+      return fields;
+    }
+
+    async function saveEdit(msg) {
+      const fields = reportFields();
+      if (!fields.scout_name || !fields.date_watched) {
+        msg.innerHTML = '<div class="msg error">Name and date watched are required.</div>';
+        return;
+      }
+      const btn = document.getElementById("submit-btn");
+      btn.disabled = true;
+      btn.textContent = "Saving...";
+      try {
+        await updateReport(editingId, fields);
+        msg.innerHTML = `<div class="msg success">Changes saved (${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}). <a href="${playerLink(selectedPlayer.player_id)}">Back to ${escapeHtml(selectedPlayer.name)}</a></div>`;
+      } catch (err) {
+        msg.innerHTML = isNetworkError(err)
+          ? '<div class="msg error">No connection - your changes aren\'t saved yet. Keep this tab open and press Save again once you have signal.</div>'
+          : `<div class="msg error">Failed to save: ${escapeHtml(err.message)}</div>`;
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "Save Changes";
+      }
+    }
+
+    async function loadForEdit() {
+      document.title = "Edit Scouting Report";
+      document.getElementById("form-title").textContent = "Edit Scouting Report";
+      document.getElementById("form-intro").textContent = "Pick up where you left off - Save Changes as often as you like.";
+      document.getElementById("submit-btn").textContent = "Save Changes";
+      const r = await fetchReport(editingId);
+      if (!r) throw new Error("that report wasn't found");
+      const p = allPlayers.find((pl) => pl.player_id === r.player_id);
+      showSelectedPlayer(p || { player_id: r.player_id, name: "Unknown player", school: "" });
+      document.getElementById("scout-name").value = r.scout_name || "";
+      document.getElementById("date-watched").value = r.date_watched || "";
+      document.getElementById("context").value = r.context || "";
+      document.querySelectorAll("#report-form [data-column]").forEach((el) => {
+        el.value = r[el.dataset.column] || "";
+      });
+    }
+
+    // New reports start on today's date (the device's local day, not UTC - a report written
+    // at 9pm shouldn't land on tomorrow).
+    function setDateToToday() {
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      document.getElementById("date-watched").value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+
     function resetReportForm() {
       document.getElementById("report-form").reset();
+      setDateToToday();
       selectedPlayer = null;
       setAddingPlayer(false);
       document.getElementById("np-dupes").innerHTML = "";
@@ -349,8 +416,10 @@
     }
 
     (async function init() {
+      if (!editingId) setDateToToday(); // an edited report keeps its own date
       try {
         allPlayers = await fetchAllPlayers();
+        if (editingId) return await loadForEdit();
         const presetId = qs("id");
         if (presetId) {
           const p = allPlayers.find((pl) => pl.player_id === presetId);
@@ -358,7 +427,7 @@
         }
       } catch (e) {
         document.getElementById("form-msg").innerHTML =
-          `<div class="msg error">Failed to load player list: ${escapeHtml(e.message)}</div>`;
+          `<div class="msg error">Failed to load ${editingId ? "the report" : "player list"}: ${escapeHtml(e.message)}</div>`;
         console.error(e);
       }
     })();

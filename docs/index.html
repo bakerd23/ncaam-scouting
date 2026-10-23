@@ -28,6 +28,7 @@
       <select id="filter-school"><option value="">All Schools</option></select>
       <select id="filter-position"><option value="">All Positions</option></select>
       <select id="filter-class"><option value="">All Classes</option></select>
+      <select id="filter-flag" hidden><option value="">All Flags</option></select>
       <button class="btn secondary stats-only" id="add-filter-btn" type="button" aria-expanded="false" aria-controls="filter-panel">Filters</button>
       <button class="btn secondary d1-only" id="hm-toggle" type="button" aria-pressed="false"
         title="Only count games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents">vs High/Mid Major Only</button>
@@ -155,7 +156,7 @@
       { value: "class", label: "Class", type: "string", group: "Player", hint: "SR" },
       { value: "height", label: "Height", type: "height", group: "Player", hint: "6'5\"" },
       { value: "weight", label: "Weight", type: "weight", group: "Player", hint: "200" },
-      { value: "record", label: "Team Win %", type: "record", group: "Player", hint: "0.600", d1Only: true },
+      { value: "record", label: "Team Win % (2025-26)", type: "record", group: "Player", hint: "0.600", d1Only: true },
       { value: "gp", label: "Games Played", type: "number", group: "Per Game" },
       { value: "min", label: "Minutes", type: "number", group: "Per Game" },
       { value: "ppg", label: "Points", type: "number", group: "Per Game" },
@@ -387,6 +388,61 @@
       return compareNumbers(parseFloat(p[f.stat]), f.comparison, parseFloat(f.value));
     }
 
+    // Nelson's flags (set on the player page). The filter only appears once he has some.
+    let flagsById = {};
+    function setupFlagFilter(flagTypes) {
+      flagsById = Object.fromEntries(flagTypes.map((f) => [f.id, f]));
+      const el = document.getElementById("filter-flag");
+      el.hidden = flagTypes.length === 0;
+      el.innerHTML =
+        '<option value="">All Flags</option><option value="any">Any flag</option><option value="none">No flag</option>' +
+        flagTypes.map((f) => `<option value="${escapeHtml(f.id)}">${escapeHtml(f.label)}</option>`).join("");
+    }
+
+    // Puts each player's flag on his row data (and the High/Mid Major copies, if showing):
+    // what the database said, with this browser's own changes from the last couple of minutes
+    // on top (see recentFlagEdits in app.js).
+    let lastFlagTypes = [];
+    let lastPlayerFlags = {};
+    function applyFlags(flagTypes = lastFlagTypes, playerFlags = lastPlayerFlags) {
+      lastFlagTypes = flagTypes;
+      lastPlayerFlags = playerFlags;
+      const sel = document.getElementById("filter-flag");
+      const keep = sel.value;
+      setupFlagFilter(flagTypes);
+      if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+      const flags = { ...playerFlags };
+      for (const [playerId, edit] of Object.entries(recentFlagEdits())) flags[playerId] = edit.flagId;
+      const set = (p) => {
+        p.flag_id = flagsById[flags[p.player_id]] ? flags[p.player_id] : null;
+      };
+      basePlayers.forEach(set);
+      if (allPlayers !== basePlayers) allPlayers.forEach(set);
+    }
+
+    async function refreshFlags() {
+      if (!basePlayers.length) return;
+      applyFlags(); // this browser's own changes show at once
+      applyFiltersAndSort();
+      try {
+        const [flagTypes, playerFlags] = await Promise.all([fetchFlagTypes(), fetchPlayerFlags()]);
+        applyFlags(flagTypes, playerFlags);
+        applyFiltersAndSort();
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    // Coming back with the Back button shows the browser's saved copy of this page, from before
+    // a flag was changed on a player's page; a flag changed in another tab shows up as a
+    // storage change. Either way, bring the flags up to date.
+    window.addEventListener("pageshow", (e) => {
+      if (e.persisted) refreshFlags();
+    });
+    window.addEventListener("storage", (e) => {
+      if (e.key === FLAG_EDITS_KEY) refreshFlags();
+    });
+
     function currentFilters() {
       return {
         search: document.getElementById("search").value.trim().toLowerCase(),
@@ -394,6 +450,7 @@
         school: document.getElementById("filter-school").value,
         position: document.getElementById("filter-position").value,
         cls: document.getElementById("filter-class").value,
+        flag: document.getElementById("filter-flag").value,
       };
     }
 
@@ -407,6 +464,7 @@
         if (f.school && p.school !== f.school) return false;
         if (f.position && p.position !== f.position) return false;
         if (f.cls && p.class !== f.cls) return false;
+        if (f.flag === "any" ? !p.flag_id : f.flag === "none" ? p.flag_id : f.flag && p.flag_id !== f.flag) return false;
         return dynamicFilters.every((df) => playerMatchesDynamicFilter(p, df));
       });
 
@@ -431,7 +489,8 @@
         `${rows.length} of ${levelPlayers.length} ${level === "JUCO" ? "JUCO " : ""}players` +
         (level === "ADDED" ? " added by scouts · add more from Submit a Report" : "") +
         (hmOnly ? " · stats from games vs High/Mid Major opponents only" : "") +
-        (level === "JUCO" ? " · NJCAA D1/D2 2026-27 rosters, 2025-26 stats where available" : "");
+        (level === "JUCO" ? " · NJCAA D1/D2 2026-27 rosters, 2025-26 stats where available" : "") +
+        (level === "D1" && !hmOnly ? " · 2026-27 rosters, 2025-26 stats" : "");
     }
 
     function renderReportCountCell(count) {
@@ -465,7 +524,7 @@
 
     function rowHtml(p) {
       return `
-        <tr onclick="window.location.href='${playerLink(p.player_id, hmOnly)}'">
+        <tr${flagsById[p.flag_id] ? ` class="flagged" style="--flag:${escapeHtml(flagsById[p.flag_id].color)}"` : ""} onclick="window.location.href='${playerLink(p.player_id, hmOnly)}'">
           <td>${escapeHtml(p.name)}</td>
           <td title="${escapeHtml(p.school)}">${escapeHtml(shortSchool(p.school))}<div class="tot" title="${escapeHtml(p.conference)}">${escapeHtml(conferenceLabel(p))}</div></td>
           <td>${escapeHtml(p.position)}</td>
@@ -485,7 +544,7 @@
           <td class="d1-only">${fmtPct(p.stl_pct)}</td>
           <td class="d1-only">${fmtPct(p.blk_pct)}</td>
           <td class="stats-only">${fmtStat(p.ft_rate, 3)}</td>
-          <td>${renderReportCountCell(p.report_count)}</td>
+          <td>${flagDot(flagsById[p.flag_id])}${renderReportCountCell(p.report_count)}</td>
         </tr>`;
     }
 
@@ -576,7 +635,7 @@
       });
     });
 
-    ["search", "filter-conference", "filter-school", "filter-position", "filter-class"].forEach(
+    ["search", "filter-conference", "filter-school", "filter-position", "filter-class", "filter-flag"].forEach(
       (id) => {
         document.getElementById(id).addEventListener("input", applyFiltersAndSort);
       }
@@ -587,14 +646,16 @@
       try {
         const session = await getSession();
         canViewReports = !!session || !window.REQUIRE_LOGIN_FOR_REPORTS;
-        const [players, reportCounts] = await Promise.all([
+        // Counts and flags are extra - offline with no saved copy, still show the players.
+        const extra = (fallback) => (err) => (console.error(err), fallback);
+        const [players, reportCounts, flagTypes, playerFlags] = await Promise.all([
           fetchAllPlayers(),
-          canViewReports ? fetchReportCounts() : Promise.resolve({}),
+          canViewReports ? fetchReportCounts().catch(extra({})) : Promise.resolve({}),
+          fetchFlagTypes().catch(extra([])),
+          fetchPlayerFlags().catch(extra({})),
         ]);
-        basePlayers = players.map((p) => ({
-          ...p,
-          report_count: reportCounts[p.player_id] || 0,
-        }));
+        basePlayers = players.map((p) => ({ ...p, report_count: reportCounts[p.player_id] || 0 }));
+        applyFlags(flagTypes, playerFlags);
         allPlayers = basePlayers;
         updateSortHeaders();
         setLevel(level);
