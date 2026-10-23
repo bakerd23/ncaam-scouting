@@ -85,15 +85,15 @@
         : currentPlayer.gp === null || currentPlayer.gp === undefined
         ? '<p class="player-meta">No 2025-26 NJCAA stats on file (incoming player).</p>'
         : `<p class="player-meta">2025-26 NJCAA stats${currentPlayer.stats_school ? ` at ${escapeHtml(currentPlayer.stats_school)}` : ""}.</p>`;
-      // D1 rosters are 2026-27 but stats stay 2025-26 - say so when they're from another school
-      // (a transfer) or there are none (freshman, or new to D1).
+      // D1 stats are 2026-27: blank until he plays (last season is in Career History), and
+      // labeled with the school when it's not his current one (a mid-season transfer).
       const d1Note =
         playerLevel(currentPlayer) !== "D1"
         ? ""
         : currentPlayer.gp === null || currentPlayer.gp === undefined
-        ? '<p class="player-meta">No 2025-26 D1 stats on file (freshman or new to D1).</p>'
+        ? '<p class="player-meta">No 2026-27 stats yet - they fill in once he plays. Last season is under Career History.</p>'
         : currentPlayer.stats_school
-        ? `<p class="player-meta">2025-26 stats at ${escapeHtml(currentPlayer.stats_school)}.</p>`
+        ? `<p class="player-meta">2026-27 stats at ${escapeHtml(currentPlayer.stats_school)}.</p>`
         : "";
       const note =
         isJuco
@@ -101,7 +101,7 @@
         : hmOnly && !hmSplit
           ? '<p class="player-meta">No games vs High/Mid Major opponents on record.</p>'
           : hmOnly
-          ? '<p class="player-meta">Games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents only (2025-26).</p>'
+          ? '<p class="player-meta">Games vs ACC, Big Ten, Big East, Big 12, SEC, Pac-12, Mountain West, A-10, American and MVC opponents only (2026-27).</p>'
           : d1Note;
       document.getElementById("stats-section").innerHTML = `
           ${note}
@@ -118,7 +118,7 @@
             <div class="stat-tile"><div class="value">${fmtPct(p.three_pct)}</div><div class="sub">${fmtMadeAtt(p.fg3m, p.fg3a)}</div><div class="label">3P%</div></div>
             <div class="stat-tile"><div class="value">${fmtPct(p.ft_pct)}</div><div class="sub">${fmtMadeAtt(p.ftm, p.fta)}</div><div class="label">FT%</div></div>
           </div>
-          <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(2025-26)</span></h3>
+          <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(${isJuco ? "2025-26" : "2026-27"})</span></h3>
           <div class="stat-grid">
             <div class="stat-tile d1-only" title="% of available offensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.orb_pct)}</div><div class="label">ORB%</div></div>
             <div class="stat-tile d1-only" title="% of available defensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.drb_pct)}</div><div class="label">DRB%</div></div>
@@ -177,7 +177,7 @@
         ? [p.school, `NJCAA ${p.juco_division || ""}`.trim(), p.conference].filter(Boolean).map(escapeHtml).join(" &middot; ")
         : isAdded
         ? [p.school, p.added_level].filter(Boolean).map(escapeHtml).join(" &middot; ")
-        : `${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; 2025-26 Record: ${escapeHtml(p.record || "—")}`;
+        : `${escapeHtml(p.school || "")} &middot; ${escapeHtml(p.conference || "")} &middot; Record: ${escapeHtml(p.record || "—")}`;
       const addedNote = isAdded
         ? `<p class="player-meta" style="margin-top:10px;">Added by ${escapeHtml(p.added_by || "a scout")} &middot; not on an ESPN or NJCAA roster, so no stats on file.</p>`
         : "";

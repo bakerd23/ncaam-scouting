@@ -56,11 +56,11 @@
             <th class="stats-only" data-sort="fg_pct" title="FG% (attempts per game); season makes-attempts underneath">FG%</th>
             <th class="stats-only" data-sort="three_pct" title="3P% (attempts per game); season makes-attempts underneath">3P%</th>
             <th class="stats-only" data-sort="ft_pct" title="FT% (attempts per game); season makes-attempts underneath">FT%</th>
-            <th class="d1-only" data-sort="orb_pct" title="Offensive Rebound Rate: % of available offensive rebounds grabbed while on the floor (2025-26)">ORB%</th>
-            <th class="d1-only" data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2025-26)">DRB%</th>
-            <th class="d1-only" data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2025-26)">STL%</th>
-            <th class="d1-only" data-sort="blk_pct" title="Block Rate: % of opponent 2-point attempts blocked by the player while on the floor (2025-26)">BLK%</th>
-            <th class="stats-only" data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (2025-26)">FTr</th>
+            <th class="d1-only" data-sort="orb_pct" title="Offensive Rebound Rate: % of available offensive rebounds grabbed while on the floor (2026-27)">ORB%</th>
+            <th class="d1-only" data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2026-27)">DRB%</th>
+            <th class="d1-only" data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2026-27)">STL%</th>
+            <th class="d1-only" data-sort="blk_pct" title="Block Rate: % of opponent 2-point attempts blocked by the player while on the floor (2026-27)">BLK%</th>
+            <th class="stats-only" data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (D1 2026-27, JUCO 2025-26)">FTr</th>
             <th data-sort="report_count">Reports</th>
           </tr>
           <!-- Second header row: sorts by the season-total line under each stat. -->
@@ -149,7 +149,7 @@
       { value: "class", label: "Class", type: "string", group: "Player", hint: "SR" },
       { value: "height", label: "Height", type: "height", group: "Player", hint: "6'5\"" },
       { value: "weight", label: "Weight", type: "weight", group: "Player", hint: "200" },
-      { value: "record", label: "Team Win % (2025-26)", type: "record", group: "Player", hint: "0.600", d1Only: true },
+      { value: "record", label: "Team Win %", type: "record", group: "Player", hint: "0.600", d1Only: true },
       { value: "gp", label: "Games Played", type: "number", group: "Per Game" },
       { value: "min", label: "Minutes", type: "number", group: "Per Game" },
       { value: "ppg", label: "Points", type: "number", group: "Per Game" },
@@ -483,7 +483,7 @@
         (level === "ADDED" ? " added by scouts · add more from Submit a Report" : "") +
         (hmOnly ? " · stats from games vs High/Mid Major opponents only" : "") +
         (level === "JUCO" ? " · NJCAA D1/D2 2026-27 rosters, 2025-26 stats where available" : "") +
-        (level === "D1" && !hmOnly ? " · 2026-27 rosters, 2025-26 stats" : "");
+        (level === "D1" && !hmOnly ? " · 2026-27 rosters and stats - stats fill in as games are played" : "");
     }
 
     function renderReportCountCell(count) {

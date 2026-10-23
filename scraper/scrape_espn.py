@@ -79,10 +79,10 @@ CAREER_STATS_URL = (
 # conferences and rosters - is ROSTER_SEASON. The stats - per-game stats pages, box scores /
 # advanced metrics, team records - are STATS_SEASON, attached to each player by his ESPN ID
 # wherever he played that season (stats_school records it when that's not his current
-# school). Stats stay on 2025-26 until the user says to switch, even once games start, so
-# every player's numbers come from the same season; then bump STATS_SEASON to 2027.
+# school). Switched to 2026-27 on 2026-10-22, before games started: stats are blank until
+# each team's first game (see teams_with_games), and last season lives on in career history.
 ROSTER_SEASON = 2027
-STATS_SEASON = 2026
+STATS_SEASON = 2027
 
 SCOREBOARD_URL = (
     "https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball"
@@ -783,6 +783,14 @@ ROSTER_FIELDS = ("position", "class", "height", "weight")
 STAT_FIELDS = tuple(STAT_COLUMN_MAP.values())
 
 
+def teams_with_games(client, season):
+    """ESPN team IDs with at least one completed `season` game in the box score cache. Before
+    a team's first game, its stats page for the new season just repeats last season's
+    numbers (2026-10-22: Duke's "2026-27" page still had Cameron Boozer's 38 games), so only
+    these teams' pages are read."""
+    return {r["team_id"] for r in select_all(client, "game_team_stats", "team_id", season)}
+
+
 def merge_player_rows(roster_rows, stat_lines):
     """One row per rostered player, with his STATS_SEASON stat line attached.
 
@@ -795,7 +803,16 @@ def merge_player_rows(roster_rows, stat_lines):
 
     Stat lines with no rostered player - graduated, gone pro, left D1 - are dropped; those
     players' old rows age out through prune_stale_players.
+
+    `stat_lines` None (couldn't tell which teams have played) leaves the stat columns off
+    the rows entirely, so the upsert keeps what's already stored.
     """
+    if stat_lines is None:
+        merged = {}
+        for row in roster_rows:
+            merged.setdefault(row["player_id"], dict(row))
+        return list(merged.values())
+
     def line_key(espn_player_id, name, school):
         return espn_player_id or (slugify(name), school)
 
@@ -979,6 +996,15 @@ def main():
         stats_teams = [t for t in stats_teams if t["team_id"] in ids]
         print(f"TEAM_LIMIT set, only scraping the first {len(roster_teams)} teams.")
 
+    try:
+        played = teams_with_games(client, STATS_SEASON)
+        stats_teams = [t for t in stats_teams if t["team_id"] in played]
+        print(f"{len(stats_teams)} teams have played a {STATS_SEASON} game - reading their stats pages.")
+    except Exception as e:
+        played = None
+        stats_teams = []
+        print(f"Couldn't tell which teams have played, keeping existing stats this run: {e}")
+
     include_career_stats = os.environ.get("INCLUDE_CAREER_STATS", "").strip().lower() in (
         "1",
         "true",
@@ -1004,7 +1030,7 @@ def main():
             roster_rows.extend(scrape_team_roster(page, team))
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
-        stat_lines = []
+        stat_lines = None if played is None else []
         for i, team in enumerate(stats_teams, start=1):
             print(f"[stats {i}/{len(stats_teams)}] {team['name']}")
             stat_lines.extend(scrape_team_stats(page, team))
@@ -1015,11 +1041,12 @@ def main():
     # Everything's collected before anything's written: a player's stats can be on another
     # team's page than his roster (see merge_player_rows).
     rows = merge_player_rows(roster_rows, stat_lines)
-    with_stats = sum(1 for r in rows if r["gp"] is not None)
-    moved = sum(1 for r in rows if r["stats_school"])
+    with_stats = sum(1 for r in rows if r.get("gp") is not None)
+    moved = sum(1 for r in rows if r.get("stats_school"))
     print(
         f"\n{len(roster_rows)} roster entries -> {len(rows)} players; {with_stats} with "
-        f"{STATS_SEASON} stats ({moved} from another school), from {len(stat_lines)} stat lines."
+        f"{STATS_SEASON} stats ({moved} from another school), from "
+        f"{'no' if stat_lines is None else len(stat_lines)} stat lines."
     )
     split_rows = attach_advanced(rows, advanced)
     upsert_players(client, rows)
