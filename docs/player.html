@@ -83,8 +83,8 @@
       const jucoNote = !isJuco
         ? ""
         : currentPlayer.gp === null || currentPlayer.gp === undefined
-        ? '<p class="player-meta">No 2025-26 NJCAA stats on file (incoming player).</p>'
-        : `<p class="player-meta">2025-26 NJCAA stats${currentPlayer.stats_school ? ` at ${escapeHtml(currentPlayer.stats_school)}` : ""}.</p>`;
+        ? '<p class="player-meta">No 2026-27 stats yet - they fill in once he plays. Last season (if he played NJCAA) is under Career History.</p>'
+        : '<p class="player-meta">2026-27 NJCAA stats.</p>';
       // D1 stats are 2026-27: blank until he plays (last season is in Career History), and
       // labeled with the school when it's not his current one (a mid-season transfer).
       const d1Note =
@@ -118,7 +118,7 @@
             <div class="stat-tile"><div class="value">${fmtPct(p.three_pct)}</div><div class="sub">${fmtMadeAtt(p.fg3m, p.fg3a)}</div><div class="label">3P%</div></div>
             <div class="stat-tile"><div class="value">${fmtPct(p.ft_pct)}</div><div class="sub">${fmtMadeAtt(p.ftm, p.fta)}</div><div class="label">FT%</div></div>
           </div>
-          <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(${isJuco ? "2025-26" : "2026-27"})</span></h3>
+          <h3 style="margin:18px 0 0;">Advanced <span class="player-meta">(2026-27)</span></h3>
           <div class="stat-grid">
             <div class="stat-tile d1-only" title="% of available offensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.orb_pct)}</div><div class="label">ORB%</div></div>
             <div class="stat-tile d1-only" title="% of available defensive rebounds grabbed while on the floor"><div class="value">${fmtPct(p.drb_pct)}</div><div class="label">DRB%</div></div>

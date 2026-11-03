@@ -11,17 +11,19 @@ like the ESPN JSON calls:
   - tenant/stats (2026-27, no players): every NJCAA school with its division, region and
     team-season ID
   - team/roster: one call per D1/D2 school for its 2026-27 roster
-  - tenant/stats (2025-26, with players): last season's full stat lines, paged 250 at a time
+  - tenant/stats (2026-27, with players): this season's stat lines, keyed by the same player
+    ID as the rosters, paged 250 at a time. Blank until a player has played.
+  - tenant/stats (2025-26, with players): last season's archive, written to career_stats so
+    it shows under Career History (like D1's past seasons from ESPN)
 
-Last season's stats are attached to returning players. The 2026-27 rosters use a different
-person ID than the 2025-26 archive, so the match is on normalized name: same school first,
-then any NJCAA school if exactly one 2025-26 player has that name and exactly one roster
-player is claiming it (stats_school then records where the stats are from). A stat line is
-never given to two players. Incoming freshmen have no stats, which is expected.
+The 2025-26 archive uses a different person ID than 2026-27, so last season is matched on
+normalized name: same school first, then any NJCAA school if exactly one 2025-26 player has
+that name and exactly one roster player is claiming it. A stat line is never given to two
+players.
 
 No advanced rebound/steal/block rates here - those need per-game team and opponent totals,
-and NJCAA's archive has no box scores. FT Rate only needs the player's own numbers, so it's
-included, with the same 20-FGA minimum as D1.
+and NJCAA has no box scores in this feed. FT Rate only needs the player's own numbers, so
+it's included, with the same 20-FGA minimum as D1.
 
 Env vars required: SUPABASE_URL, SUPABASE_SERVICE_KEY (same as scrape_espn.py).
 """
@@ -42,7 +44,9 @@ from scrape_espn import MIN_FGA_FOR_FT_RATE, execute, prune_stale_players
 
 NJCAA_TENANT_ID = "404933495157163011"
 ROSTER_SEASON = "2026-27"
-STATS_SEASON = "2025-26"
+STATS_SEASON = "2026-27"
+LAST_SEASON = "2025-26"
+LAST_SEASON_YEAR = 2026  # career_stats.season_year, ESPN-style (2026 = 2025-26)
 DIVISIONS = {"d1": "D1", "d2": "D2"}
 
 API = "https://0wtr7r0cl7.execute-api.us-east-2.amazonaws.com/prod"
@@ -59,14 +63,6 @@ STATS_URL = (
     "&include_players=true&include_games=false&player_offset={offset}"
 )
 STATS_PAGE_SIZE = 250
-
-# Some schools' "2026-27" rosters on NJCAA are really last season's roster carried over -
-# 100% the same names, sophomores who've already left for D1 included. JUCO rosters normally
-# turn over half or more each year (2026-10-08: 70 of 104 posted rosters had under 50% of
-# last year's team; 28 had 75-100%). A roster where at least this share played for the
-# same school last season is treated as not posted yet, and drops back in automatically
-# once the school puts up its real one.
-STALE_ROSTER_SHARE = 0.75
 WORKERS = 6
 
 POSITIONS = {
@@ -125,26 +121,51 @@ def get_roster(school):
         return school, None
 
 
-def get_last_season_stats():
-    """Every 2025-26 NJCAA player stat line (all divisions, so a D3-to-D1 move still
-    matches)."""
-    first = njcaa_get(STATS_URL.format(tenant=NJCAA_TENANT_ID, season=STATS_SEASON, offset=0))
+def get_stat_pages(season):
+    """Every page of tenant/stats with players for `season` (all NJCAA divisions)."""
+    first = njcaa_get(STATS_URL.format(tenant=NJCAA_TENANT_ID, season=season, offset=0))
     total = first.get("playerTotal") or 0
     offsets = range(STATS_PAGE_SIZE, total, STATS_PAGE_SIZE)
     with ThreadPoolExecutor(WORKERS) as pool:
         pages = list(
             pool.map(
                 lambda o: njcaa_get(
-                    STATS_URL.format(tenant=NJCAA_TENANT_ID, season=STATS_SEASON, offset=o)
-                ).get("players")
-                or [],
+                    STATS_URL.format(tenant=NJCAA_TENANT_ID, season=season, offset=o)
+                ),
                 offsets,
             )
         )
-    players = (first.get("players") or []) + [p for page in pages for p in page]
+    return [first] + pages, total
+
+
+def get_last_season_stats():
+    """Every 2025-26 NJCAA player stat line (all divisions, so a D3-to-D1 move still
+    matches). The archive lists players flat, with schoolTenantId/schoolDisplayName."""
+    pages, total = get_stat_pages(LAST_SEASON)
+    players = [p for page in pages for p in page.get("players") or []]
     if len(players) < total:
-        print(f"  warning: got {len(players)} of {total} 2025-26 stat lines")
+        print(f"  warning: got {len(players)} of {total} {LAST_SEASON} stat lines")
     return players
+
+
+def get_current_stats():
+    """{roster player ID: stat line} for this season. The live feed nests players under
+    schools. A line claiming more games than the school has played is ignored - a guard
+    against last season's numbers showing before a team's first game, as ESPN does."""
+    pages, total = get_stat_pages(STATS_SEASON)
+    stats, seen = {}, 0
+    for page in pages:
+        for school in page.get("schools") or []:
+            team_gp = _int((school.get("totals") or {}).get("gp")) or 0
+            for p in school.get("players") or []:
+                seen += 1
+                line = p.get("stats") or {}
+                gp = _int(line.get("gp")) or 0
+                if p.get("playerId") and 0 < gp <= team_gp:
+                    stats[str(p["playerId"])] = line
+    if seen < total:
+        print(f"  warning: got {seen} of {total} {STATS_SEASON} player lines")
+    return stats
 
 
 def stat_line(stats):
@@ -153,9 +174,11 @@ def stat_line(stats):
     if not gp:
         return {}
     t = {k: _int(stats.get(k)) or 0 for k in (
-        "min", "pts", "treb", "ast", "stl", "blk", "to",
-        "fgm", "fga", "fgm3", "fga3", "ftm", "fta",
+        "min", "pts", "treb", "ast", "stl", "blk", "to", "fgm", "fga", "ftm", "fta",
     )}
+    # The 2025-26 archive spells threes fgm3/fga3; the live 2026-27 feed uses fg3m/fg3a.
+    t["fgm3"] = _int(stats.get("fgm3", stats.get("fg3m"))) or 0
+    t["fga3"] = _int(stats.get("fga3", stats.get("fg3a"))) or 0
 
     def pg(v):
         return round(v / gp, 1)
@@ -196,48 +219,13 @@ def stat_line(stats):
 
 
 STAT_KEYS = tuple(stat_line({"gp": 1}).keys())
+CAREER_KEYS = (
+    "gp", "min", "ppg", "rpg", "apg", "spg", "bpg", "topg", "fg_pct", "three_pct", "ft_pct",
+)
 
 
-def split_stale_rosters(rosters, last_season):
-    """(current, stale): stale rosters are mostly last season's team at the same school."""
-    played_here = {(norm_name(p.get("displayName")), p.get("schoolTenantId")) for p in last_season}
-    current, stale = [], []
-    for school, roster in rosters:
-        returning = sum(
-            1 for a in roster if (norm_name(a.get("name")), school["tenantId"]) in played_here
-        )
-        share = returning / len(roster) if roster else 0
-        (stale if share >= STALE_ROSTER_SHARE else current).append((school, roster))
-    return current, stale
-
-
-def delete_players(client, player_ids):
-    """Removes JUCO players right away (no 7-day wait) - for schools whose posted roster is
-    really last year's. A player with scouting reports is kept."""
-    ids = list(player_ids)
-    with_reports = set()
-    for i in range(0, len(ids), 200):
-        with_reports |= {
-            r["player_id"]
-            for r in execute(
-                client.table("reports").select("player_id").in_("player_id", ids[i : i + 200])
-            ).data
-        }
-    to_delete = [pid for pid in ids if pid not in with_reports]
-    deleted = 0
-    for i in range(0, len(to_delete), 200):
-        deleted += len(
-            execute(
-                client.table("players")
-                .delete()
-                .eq("level", "JUCO")
-                .in_("player_id", to_delete[i : i + 200])
-            ).data
-        )
-    return deleted, len(with_reports)
-
-
-def build_rows(rosters, last_season):
+def build_rows(rosters, current_stats, last_season):
+    """(players rows, career_stats rows for last season, count with this season's stats)."""
     by_school = {}
     by_name = defaultdict(list)
     for p in last_season:
@@ -245,7 +233,7 @@ def build_rows(rosters, last_season):
         by_school[(key, p.get("schoolTenantId"))] = p
         by_name[key].append(p)
 
-    # Pass 1: same-name-same-school matches claim their stat line outright. Pass 2: a
+    # Pass 1: same-name-same-school matches claim their 2025-26 line outright. Pass 2: a
     # name-only match (player changed schools) only counts if nobody else claimed that line
     # and he's the only roster player with that name - two Malcolm Currys on 2026-27 rosters
     # and one 2025-26 Malcolm Curry means we can't tell which one it is.
@@ -265,9 +253,10 @@ def build_rows(rosters, last_season):
         roster_name_count[norm_name(a["name"])] += 1
 
     now = datetime.now(timezone.utc).isoformat()
-    rows, matched = [], 0
+    rows, career, matched = [], [], 0
     for school, a in entries:
         person_id = a.get("personId") or a.get("playerId")
+        player_id = f"njcaa-{person_id}"
         key = norm_name(a["name"])
         prev = by_school.get((key, school["tenantId"]))
         if (
@@ -277,12 +266,21 @@ def build_rows(rosters, last_season):
             and by_name[key][0]["personId"] not in claimed
         ):
             prev = by_name[key][0]
-        stats = stat_line(prev.get("stats") or {}) if prev else {}
+        last = stat_line(prev.get("stats") or {}) if prev else {}
+        if last:
+            career.append({
+                "player_id": player_id,
+                "season_year": LAST_SEASON_YEAR,
+                "season_display": LAST_SEASON,
+                "school": prev.get("schoolDisplayName") or "",
+                **{k: last[k] for k in CAREER_KEYS},
+            })
+        stats = stat_line(current_stats.get(str(person_id)) or {})
         matched += bool(stats)
         position = (a.get("position") or "").strip().lower()
         year = (a.get("classYear") or a.get("year") or "").upper()
         row = {
-            "player_id": f"njcaa-{person_id}",
+            "player_id": player_id,
             "name": a["name"].strip(),
             "school": school.get("school") or a.get("schoolName"),
             "conference": school.get("regionName"),
@@ -296,16 +294,13 @@ def build_rows(rosters, last_season):
             "hometown": a.get("hometown") or None,
             "high_school": a.get("highSchool") or None,
             "record": None,
-            "stats_school": (
-                prev.get("schoolDisplayName")
-                if stats and prev.get("schoolTenantId") != school["tenantId"]
-                else None
-            ),
+            # This season's stats come from his current school's feed.
+            "stats_school": None,
             "last_updated": now,
         }
         row.update({k: stats.get(k) for k in STAT_KEYS})
         rows.append(row)
-    return rows, matched
+    return rows, career, matched
 
 
 def main():
@@ -324,33 +319,28 @@ def main():
     failed = sum(1 for _, r in results if r is None)
     print(f"{len(rosters)} schools have a {ROSTER_SEASON} roster posted ({failed} fetch errors).")
 
+    current_stats = get_current_stats()
+    print(f"{len(current_stats)} NJCAA players with {STATS_SEASON} stats so far.")
     last_season = get_last_season_stats()
-    print(f"{len(last_season)} {STATS_SEASON} stat lines.")
+    print(f"{len(last_season)} {LAST_SEASON} stat lines (for Career History).")
 
-    rosters, stale = split_stale_rosters(rosters, last_season)
-    print(
-        f"Skipping {len(stale)} rosters that are mostly last season's team (not really "
-        f"{ROSTER_SEASON} yet): " + ", ".join(sorted(s["school"] for s, _ in stale))
-    )
-
-    rows, matched = build_rows(rosters, last_season)
+    rows, career, matched = build_rows(rosters, current_stats, last_season)
     # One row per player, in case a school lists someone twice.
     rows = list({r["player_id"]: r for r in rows}.values())
-    print(f"{len(rows)} JUCO players, {matched} with {STATS_SEASON} stats.")
+    career = list({(c["player_id"], c["school"]): c for c in career}.values())
+    print(
+        f"{len(rows)} JUCO players, {matched} with {STATS_SEASON} stats, "
+        f"{len(career)} with a {LAST_SEASON} season in Career History."
+    )
 
     for i in range(0, len(rows), 500):
         execute(client.table("players").upsert(rows[i : i + 500], on_conflict="player_id"))
-
-    current_ids = {r["player_id"] for r in rows}
-    stale_ids = {
-        f"njcaa-{a.get('personId') or a.get('playerId')}"
-        for _, roster in stale
-        for a in roster
-        if a.get("personId") or a.get("playerId")
-    } - current_ids
-    if stale_ids:
-        deleted, kept = delete_players(client, stale_ids)
-        print(f"Removed {deleted} players from last-season rosters ({kept} kept for their reports).")
+    for i in range(0, len(career), 500):
+        execute(
+            client.table("career_stats").upsert(
+                career[i : i + 500], on_conflict="player_id,season_year,school"
+            )
+        )
 
     # Only prune when every roster call worked - otherwise a school whose roster just failed
     # to load would start aging out (the 7-day grace period also covers this).

@@ -60,7 +60,7 @@
             <th class="d1-only" data-sort="drb_pct" title="Defensive Rebound Rate: % of available defensive rebounds grabbed while on the floor (2026-27)">DRB%</th>
             <th class="d1-only" data-sort="stl_pct" title="Steal Rate: % of opponent possessions ending in a steal by the player while on the floor (2026-27)">STL%</th>
             <th class="d1-only" data-sort="blk_pct" title="Block Rate: % of opponent 2-point attempts blocked by the player while on the floor (2026-27)">BLK%</th>
-            <th class="stats-only" data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (D1 2026-27, JUCO 2025-26)">FTr</th>
+            <th class="stats-only" data-sort="ft_rate" title="Free Throw Rate: free throw attempts per field goal attempt, FTA ÷ FGA (2026-27)">FTr</th>
             <th data-sort="report_count">Reports</th>
           </tr>
           <!-- Second header row: sorts by the season-total line under each stat. -->
@@ -482,7 +482,7 @@
         `${rows.length} of ${levelPlayers.length} ${level === "JUCO" ? "JUCO " : ""}players` +
         (level === "ADDED" ? " added by scouts · add more from Submit a Report" : "") +
         (hmOnly ? " · stats from games vs High/Mid Major opponents only" : "") +
-        (level === "JUCO" ? " · NJCAA D1/D2 2026-27 rosters, 2025-26 stats where available" : "") +
+        (level === "JUCO" ? " · NJCAA D1/D2 2026-27 rosters and stats" : "") +
         (level === "D1" && !hmOnly ? " · 2026-27 rosters and stats - stats fill in as games are played" : "");
     }
 
