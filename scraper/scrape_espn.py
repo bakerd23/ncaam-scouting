@@ -784,11 +784,25 @@ STAT_FIELDS = tuple(STAT_COLUMN_MAP.values())
 
 
 def teams_with_games(client, season):
-    """ESPN team IDs with at least one completed `season` game in the box score cache. Before
-    a team's first game, its stats page for the new season just repeats last season's
-    numbers (2026-10-22: Duke's "2026-27" page still had Cameron Boozer's 38 games), so only
-    these teams' pages are read."""
-    return {r["team_id"] for r in select_all(client, "game_team_stats", "team_id", season)}
+    """{ESPN team ID: completed `season` games} from the box score cache, for teams with at
+    least one. Before a team's first game, its stats page for the new season just repeats
+    last season's numbers (2026-10-22: Duke's "2026-27" page still had Cameron Boozer's 38
+    games), so only these teams' pages are read. Some pages keep last season's numbers even
+    after the opener (2026-11-02: George Mason, UTSA, Northern Illinois... showing 30+ GP),
+    so stat lines are also checked against the count (see stat_lines_this_season)."""
+    games = defaultdict(set)
+    for r in select_all(client, "game_team_stats", "event_id,team_id", season):
+        games[r["team_id"]].add(r["event_id"])
+    return {team_id: len(events) for team_id, events in games.items()}
+
+
+def stat_lines_this_season(lines, team_games):
+    """Drops a team page's lines that claim more games than the team has played - those are
+    last season's numbers ESPN hasn't replaced yet. If any line on the page is over, the
+    whole page is treated as stale."""
+    if any((line.get("gp") or 0) > team_games for line in lines):
+        return []
+    return lines
 
 
 def merge_player_rows(roster_rows, stat_lines):
@@ -1031,9 +1045,15 @@ def main():
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         stat_lines = None if played is None else []
+        stale_pages = 0
         for i, team in enumerate(stats_teams, start=1):
             print(f"[stats {i}/{len(stats_teams)}] {team['name']}")
-            stat_lines.extend(scrape_team_stats(page, team))
+            lines = scrape_team_stats(page, team)
+            current = stat_lines_this_season(lines, played[team["team_id"]])
+            if lines and not current:
+                stale_pages += 1
+                print(f"    skipped: page still shows last season's numbers")
+            stat_lines.extend(current)
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         browser.close()
@@ -1046,7 +1066,8 @@ def main():
     print(
         f"\n{len(roster_rows)} roster entries -> {len(rows)} players; {with_stats} with "
         f"{STATS_SEASON} stats ({moved} from another school), from "
-        f"{'no' if stat_lines is None else len(stat_lines)} stat lines."
+        f"{'no' if stat_lines is None else len(stat_lines)} stat lines"
+        f"{'' if stat_lines is None else f' ({stale_pages} pages skipped as last season)'}."
     )
     split_rows = attach_advanced(rows, advanced)
     upsert_players(client, rows)
