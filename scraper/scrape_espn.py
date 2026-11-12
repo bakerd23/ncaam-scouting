@@ -771,6 +771,50 @@ def scrape_team_roster(page, team):
     ]
 
 
+def roster_rows_from_stats(team, lines, stored):
+    """Fallback roster for a team whose roster page failed or came back empty, built from its
+    STATS_SEASON stat lines (only pass lines that passed stat_lines_this_season, or it'd be
+    last season's roster). 2026-11: ESPN's Mercer roster page showed "No Data Available" for
+    weeks (one broken athlete record) while its stats page was fine. The stats page has no
+    class/height/weight, so those come from `stored` ({player_id: row} already in the
+    database) when the player was scraped before."""
+    now = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for line in lines:
+        player_id = player_id_for(line["espn_player_id"], line["name"], team["name"])
+        old = stored.get(player_id, {})
+        rows.append(
+            {
+                "player_id": player_id,
+                "name": line["name"],
+                "school": team["name"],
+                "conference": team["conference"],
+                "position": line.get("position") or old.get("position"),
+                "class": old.get("class"),
+                "height": old.get("height"),
+                "weight": old.get("weight"),
+                "record": team["record"],
+                "espn_player_id": line["espn_player_id"],
+                "last_updated": now,
+            }
+        )
+    return rows
+
+
+def stored_roster_fields(client, player_ids):
+    """{player_id: {position, class, height, weight}} for these players already in the
+    database."""
+    out = {}
+    for i in range(0, len(player_ids), 200):
+        for r in execute(
+            client.table("players")
+            .select("player_id,position,class,height,weight")
+            .in_("player_id", player_ids[i : i + 200])
+        ).data:
+            out[r["player_id"]] = r
+    return out
+
+
 def scrape_team_stats(page, team):
     """This team's STATS_SEASON stat lines, each tagged with its name and school."""
     return [
@@ -1039,12 +1083,17 @@ def main():
         )
 
         roster_rows = []
+        no_roster = []  # teams whose roster page failed or was empty
         for i, team in enumerate(roster_teams, start=1):
             print(f"[roster {i}/{len(roster_teams)}] {team['name']} ({team['conference']})")
-            roster_rows.extend(scrape_team_roster(page, team))
+            team_rows = scrape_team_roster(page, team)
+            if not team_rows:
+                no_roster.append(team)
+            roster_rows.extend(team_rows)
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         stat_lines = None if played is None else []
+        current_by_team = {}
         stale_pages = 0
         for i, team in enumerate(stats_teams, start=1):
             print(f"[stats {i}/{len(stats_teams)}] {team['name']}")
@@ -1053,10 +1102,28 @@ def main():
             if lines and not current:
                 stale_pages += 1
                 print(f"    skipped: page still shows last season's numbers")
+            current_by_team[team["team_id"]] = current
             stat_lines.extend(current)
             time.sleep(SLEEP_BETWEEN_TEAMS)
 
         browser.close()
+
+    # A team with no roster this run gets one built from its stats page, so it doesn't
+    # silently drop out of the app (its old rows would be pruned after STALE_AFTER_DAYS).
+    for team in no_roster:
+        lines = current_by_team.get(team["team_id"])
+        if not lines:
+            print(f"  No roster for {team['name']} and no current stats page to build one from.")
+            continue
+        ids = [player_id_for(l["espn_player_id"], l["name"], team["name"]) for l in lines]
+        try:
+            stored = stored_roster_fields(client, ids)
+        except Exception as e:
+            print(f"  Couldn't read stored roster fields for {team['name']}: {e}")
+            stored = {}
+        fallback = roster_rows_from_stats(team, lines, stored)
+        roster_rows.extend(fallback)
+        print(f"  No roster page for {team['name']} - built {len(fallback)} players from its stats page.")
 
     # Everything's collected before anything's written: a player's stats can be on another
     # team's page than his roster (see merge_player_rows).
